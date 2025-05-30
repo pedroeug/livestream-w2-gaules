@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: dublagem-twitch
+    env: docker
+    plan: free
+    autoDeploy: true
