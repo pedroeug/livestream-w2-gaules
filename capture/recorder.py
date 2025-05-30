@@ -1,6 +1,12 @@
-import os, subprocess
-from dotenv import load_dotenv
+import sys
+import os
+import subprocess
 import numpy as np
+from dotenv import load_dotenv
+
+# Corrige o caminho para encontrar o módulo encoder
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Real-Time-Voice-Cloning'))
+
 from encoder import inference as encoder
 
 load_dotenv()
