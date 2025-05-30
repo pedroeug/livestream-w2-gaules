@@ -22,3 +22,4 @@ app.mount("/dub_hls", StaticFiles(directory="capture/dub_hls"), name="dub_hls")
 
 # Monta o frontend (React build)
 app.mount("/", StaticFiles(directory="frontend/build", html=True), name="frontend")
+
