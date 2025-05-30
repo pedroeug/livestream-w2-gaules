@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+whisper
+requests
+boto3
+streamlink
+numpy
+scipy
+torch
+git+https://github.com/CorentinJ/Real-Time-Voice-Cloning.git@master
