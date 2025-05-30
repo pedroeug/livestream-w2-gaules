@@ -1,10 +1,13 @@
 fastapi
 uvicorn
 pydantic
-python-dotenv
-requests
 boto3
-streamlink
+librosa
 numpy
-scipy
-torch        # ainda usado pelo Whisper
+scikit-learn
+matplotlib
+soundfile
+requests
+python-dotenv
+streamlink
+elevenlabs
