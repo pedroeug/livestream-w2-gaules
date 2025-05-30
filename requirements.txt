@@ -1,21 +1,10 @@
 fastapi
 uvicorn
-unidecode
-webrtcvad
+pydantic
+python-dotenv
+requests
+boto3
+streamlink
 numpy
 scipy
-matplotlib
-torch
-pydub
-soundfile
-PyNaCl
-requests
-tqdm
-gTTS
-python-dotenv
-librosa
-numba
-inflect
-boto3
-openai-whisper
-gdown
+torch        # ainda usado pelo Whisper
