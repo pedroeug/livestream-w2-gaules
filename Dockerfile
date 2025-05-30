@@ -1,57 +1,47 @@
-# Etapa 1: construir o frontend
+# Stage 1: build do frontend
 FROM node:18 AS frontend
-
-# Define o diretório de trabalho
 WORKDIR /frontend
 
-# Copia os arquivos do frontend
+# 1) copia package.json e instala dependências
 COPY frontend/package*.json ./
 RUN npm install
-COPY frontend/ .
 
-# Constrói o frontend para produção
+# 2) coloca o index.html na raiz (necessário para Rollup/Vite)
+COPY frontend/public/index.html ./
+
+# 3) copia todo o resto do frontend
+COPY frontend/ ./
+
+# 4) build
 RUN npm run build
 
-# Etapa 2: imagem final
+# Stage 2: imagem final
 FROM python:3.10-slim
-
-# Instala dependências do sistema (ffmpeg, espeak-ng etc.)
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    libsndfile1 \
-    espeak-ng \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
-# Copia os arquivos de backend
-COPY backend/ /app/backend
-COPY capture/ /app/capture
-COPY pipeline/ /app/pipeline
+# instala dependências do sistema
+RUN apt-get update && \
+    apt-get install -y ffmpeg streamlink git libsndfile1 build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copia os diretórios do Real-Time-Voice-Cloning
-COPY Real-Time-Voice-Cloning/encoder/ /app/encoder
-COPY Real-Time-Voice-Cloning/synthesizer/ /app/synthesizer
-COPY Real-Time-Voice-Cloning/vocoder/ /app/vocoder
+# copia e instala dependências Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install python-dotenv tensorflow-cpu gdown
 
-# Copia o frontend já construído
-COPY --from=frontend /frontend/build /app/frontend/build
+# clona Voice-Cloning
+RUN git clone https://github.com/CorentinJ/Real-Time-Voice-Cloning.git /app/Real-Time-Voice-Cloning
+ENV PYTHONPATH="/app/Real-Time-Voice-Cloning:${PYTHONPATH}"
 
-# Copia os arquivos de requirements e instala as dependências
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# copia o código
+COPY backend/    ./backend
+COPY capture/    ./capture
+COPY pipeline/   ./pipeline
 
-# Instala gdown para baixar os modelos durante o startup
-RUN pip install gdown
+# copia o frontend buildado
+COPY --from=frontend /frontend/build ./frontend/build
 
-# Baixa os modelos ao iniciar
-RUN python backend/utils/download_models.py
-
-# Expõe a porta que será usada
+# expõe a porta e define o start command
 ENV PORT=8000
 EXPOSE $PORT
-
-# Comando para iniciar o backend
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -c 'import download_models; download_models.main()' && uvicorn backend.main:app --host 0.0.0.0 --port $PORT"]
