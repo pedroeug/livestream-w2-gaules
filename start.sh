@@ -3,10 +3,10 @@
 set -e
 
 echo "[1/3] Instalando dependências do gdown..."
-pip install --no-cache-dir gdown
+pip install gdown
 
 echo "[2/3] Baixando os modelos com gdown..."
-python3 download_models.py
+python download_models.py
 
 echo "[3/3] Iniciando o servidor..."
-exec uvicorn backend.main:app --host 0.0.0.0 --port "$PORT"
+exec uvicorn backend.main:app --host 0.0.0.0 --port $PORT
