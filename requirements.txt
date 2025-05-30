@@ -2,10 +2,7 @@ fastapi
 uvicorn
 pydantic
 boto3
-librosa
 numpy
-scikit-learn
-matplotlib
 soundfile
 requests
 python-dotenv
