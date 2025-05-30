@@ -9,4 +9,3 @@ streamlink
 numpy
 scipy
 torch
-git+https://github.com/CorentinJ/Real-Time-Voice-Cloning.git@master
