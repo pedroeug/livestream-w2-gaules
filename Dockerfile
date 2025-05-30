@@ -1,10 +1,19 @@
-# Usar imagem base com Python
+# Dockerfile
+FROM node:18 AS frontend
+
+WORKDIR /frontend
+
+COPY frontend/package*.json ./
+RUN npm install
+
+COPY frontend/ ./
+RUN npm run build
+
+
 FROM python:3.10-slim
 
-# Variável de ambiente para a porta usada pela Render
 ENV PORT=10000
 
-# Instalar dependências de sistema necessárias
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
@@ -12,20 +21,24 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Criar diretório da aplicação
 WORKDIR /app
 
-# Copiar todos os arquivos da aplicação
-COPY . /app
+# Copia o backend
+COPY backend/ /app/backend
+COPY capture/ /app/capture
+COPY encoder/ /app/encoder
+COPY synthesizer/ /app/synthesizer
+COPY vocoder/ /app/vocoder
+COPY pipeline/ /app/pipeline
+COPY requirements.txt /app/
+COPY download_models.py /app/
+COPY start.sh /app/
 
-# Instalar dependências Python
+# Copia o frontend build do estágio anterior
+COPY --from=frontend /frontend/build /app/frontend/build
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Tornar script executável
-RUN chmod +x /app/start.sh
-
-# Expor a porta para Render detectar
 EXPOSE $PORT
 
-# Rodar o script que baixa os modelos e inicia o servidor
-CMD ["./start.sh"]
+CMD ["bash", "start.sh"]
