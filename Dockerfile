@@ -1,3 +1,5 @@
+# Dockerfile
+
 # 1) build do frontend
 FROM node:16 AS frontend-builder
 WORKDIR /app/frontend
@@ -10,22 +12,33 @@ RUN npm run build
 FROM python:3.10-slim
 WORKDIR /app
 
-# instala dependências de sistema
-RUN apt-get update && apt-get install -y ffmpeg streamlink git && rm -rf /var/lib/apt/lists/*
+# instala sistema / git / ffmpeg / streamlink
+RUN apt-get update && \
+    apt-get install -y ffmpeg streamlink git && \
+    rm -rf /var/lib/apt/lists/*
 
 # instala python-dotenv
 RUN pip install python-dotenv
 
-# instala dependências Python
+# copia e instala as dependências do seu projeto
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# copia código
-COPY backend/ ./backend
-COPY capture/ ./capture
-COPY pipeline/ ./pipeline
+# --- Voice-Cloning: clona o repositório e instala deps ---
+RUN git clone https://github.com/CorentinJ/Real-Time-Voice-Cloning.git && \
+    pip install --no-cache-dir -r Real-Time-Voice-Cloning/requirements.txt
+
+# garante que o Python veja o código do Voice-Cloning
+ENV PYTHONPATH="/app/Real-Time-Voice-Cloning:${PYTHONPATH}"
+
+# copia código da aplicação e o build do frontend
+COPY backend/    ./backend
+COPY capture/    ./capture
+COPY pipeline/   ./pipeline
 COPY --from=frontend-builder /app/frontend/build ./frontend/build
 
+# expõe a porta da aplicação
 EXPOSE 8000
 
+# comando de startup
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
