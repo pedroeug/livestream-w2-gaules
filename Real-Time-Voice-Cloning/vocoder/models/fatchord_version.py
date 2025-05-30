@@ -32,9 +32,7 @@ class MelResNet(nn.Module):
         k_size = pad * 2 + 1
         self.conv_in = nn.Conv1d(in_dims, compute_dims, kernel_size=k_size, bias=False)
         self.batch_norm = nn.BatchNorm1d(compute_dims)
-        self.layers = nn.ModuleList()
-        for _ in range(res_blocks):
-            self.layers.append(ResBlock(compute_dims))
+        self.layers = nn.ModuleList([ResBlock(compute_dims) for _ in range(res_blocks)])
         self.conv_out = nn.Conv1d(compute_dims, res_out_dims, kernel_size=1)
 
     def forward(self, x):
@@ -87,3 +85,68 @@ class UpsampleNetwork(nn.Module):
             m = f(m)
         m = m.squeeze(1)[:, :, self.indent:-self.indent]
         return m.transpose(1, 2), aux.transpose(1, 2)
+
+
+class WaveRNN(nn.Module):
+    def __init__(self, rnn_dims, fc_dims, bits, pad, upsample_factors,
+                 feat_dims, compute_dims, res_out_dims, res_blocks,
+                 hop_length, sample_rate, mode='RAW'):
+        super().__init__()
+        self.mode = mode
+        self.pad = pad
+        if self.mode == 'RAW':
+            self.n_classes = 2 ** bits
+        elif self.mode == 'MOL':
+            self.n_classes = 30
+        else:
+            raise RuntimeError("Unknown model mode value - ", self.mode)
+
+        self.rnn_dims = rnn_dims
+        self.aux_dims = res_out_dims // 4
+        self.hop_length = hop_length
+        self.sample_rate = sample_rate
+
+        self.upsample = UpsampleNetwork(feat_dims, upsample_factors, compute_dims, res_blocks, res_out_dims, pad)
+        self.I = nn.Linear(feat_dims + self.aux_dims + 1, rnn_dims)
+        self.rnn1 = nn.GRU(rnn_dims, rnn_dims, batch_first=True)
+        self.rnn2 = nn.GRU(rnn_dims + self.aux_dims, rnn_dims, batch_first=True)
+        self.fc1 = nn.Linear(rnn_dims + self.aux_dims, fc_dims)
+        self.fc2 = nn.Linear(fc_dims + self.aux_dims, fc_dims)
+        self.fc3 = nn.Linear(fc_dims, self.n_classes)
+
+        self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
+        self.num_params()
+
+    def forward(self, x, mels):
+        self.step += 1
+        bsize = x.size(0)
+        h1 = torch.zeros(1, bsize, self.rnn_dims).to(x.device)
+        h2 = torch.zeros(1, bsize, self.rnn_dims).to(x.device)
+        mels, aux = self.upsample(mels)
+
+        aux_idx = [self.aux_dims * i for i in range(5)]
+        a1 = aux[:, :, aux_idx[0]:aux_idx[1]]
+        a2 = aux[:, :, aux_idx[1]:aux_idx[2]]
+        a3 = aux[:, :, aux_idx[2]:aux_idx[3]]
+        a4 = aux[:, :, aux_idx[3]:aux_idx[4]]
+
+        x = torch.cat([x.unsqueeze(-1), mels, a1], dim=2)
+        x = self.I(x)
+        res = x
+        x, _ = self.rnn1(x, h1)
+        x = x + res
+        res = x
+        x = torch.cat([x, a2], dim=2)
+        x, _ = self.rnn2(x, h2)
+        x = x + res
+        x = torch.cat([x, a3], dim=2)
+        x = F.relu(self.fc1(x))
+        x = torch.cat([x, a4], dim=2)
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+
+    def num_params(self, print_out=True):
+        parameters = filter(lambda p: p.requires_grad, self.parameters())
+        parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
+        if print_out:
+            print('Trainable Parameters: %.3fM' % parameters)
