@@ -15,14 +15,17 @@ RUN apt-get update && apt-get install -y \
 # Criar diretório da aplicação
 WORKDIR /app
 
-# Copiar arquivos
+# Copiar todos os arquivos da aplicação
 COPY . /app
 
 # Instalar dependências Python
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Tornar script executável
+RUN chmod +x /app/start.sh
+
 # Expor a porta para Render detectar
 EXPOSE $PORT
 
-# Comando para iniciar o servidor
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "10000"]
+# Rodar o script que baixa os modelos e inicia o servidor
+CMD ["./start.sh"]
