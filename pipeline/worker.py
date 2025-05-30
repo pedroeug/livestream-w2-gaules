@@ -70,4 +70,22 @@ def worker_loop():
             if not fname.endswith(".wav") or fname in seen:
                 continue
             seen.add(fname)
-            wav = f"{AUDIO_DIR}/{fn_
+            wav = f"{AUDIO_DIR}/{fname}"
+            # transcrição
+            res = model.transcribe(wav, language="pt")
+            text_en = translate_pt_to_en(res["text"])
+            # síntese clonada
+            aac_path = wav.replace("audio_chunks", "dub_hls").replace(".wav", ".aac")
+            synthesize_clone(text_en, aac_path, voice_embed)
+            # remux TS
+            seq = fname.split("_")[-1].split(".")[0]
+            raw_ts = f"{RAW_HLS}/segment{seq}.ts"
+            dub_ts = f"{DUB_HLS}/segment{seq}.ts"
+            subprocess.run([
+                "ffmpeg", "-y",
+                "-i", raw_ts,
+                "-i", aac_path,
+                "-c:v", "copy", "-c:a", "aac",
+                dub_ts
+            ], shell=True)
+        time.sleep(1)
