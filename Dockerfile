@@ -1,42 +1,44 @@
-# Etapa 1: constrói o frontend
+# --- Estágio 1: Construção do Frontend ---
 FROM node:18 AS frontend
-
-WORKDIR /frontend
-
-# Copia apenas o package.json para instalar dependências
-COPY frontend/package.json ./
-RUN npm install
-
-# Copia o restante do frontend e constrói
-COPY frontend/ .
-RUN npm run build
-
-# Etapa 2: imagem final com backend
-FROM python:3.10-slim
 
 WORKDIR /app
 
-# Instala dependências do sistema (ex: ffmpeg, git, build tools)
+# Copia package.json e package-lock.json e instala dependências
+COPY frontend/package*.json ./
+RUN npm install
+
+# Copia todo o código do frontend (inclui index.html) e executa o build
+COPY frontend/ ./
+RUN npm run build
+
+# --- Estágio 2: Imagem Final com Backend ---
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instala dependências do sistema operacional e FFmpeg
 RUN apt-get update && \
     apt-get install -y ffmpeg git curl build-essential && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python do projeto
-COPY requirements.txt .
+# Copia e instala dependências Python
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o restante do backend
-COPY backend/    ./backend
-COPY capture/    ./capture
-COPY pipeline/   ./pipeline
+# Copia o código do backend e pipeline
+COPY backend/ ./backend/
+COPY pipeline/ ./pipeline/
 
-# Copia o frontend já buildado
-COPY --from=frontend /frontend/build ./frontend/build
+# Copia a pasta build do frontend (gerada na etapa anterior)
+COPY --from=frontend /app/dist ./frontend/dist
 
-# Expõe a porta correta (Render usa a variável $PORT)
-ENV PORT=10000
+# Copia o script de inicialização
+COPY start.sh ./
+RUN chmod +x start.sh
+
+# Define variável de ambiente e expõe porta
+ENV PORT=$PORT
 EXPOSE $PORT
 
-# Comando para rodar o backend
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "10000"]
+# Comando padrão de inicialização
+CMD ["bash", "start.sh"]
