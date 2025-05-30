@@ -11,3 +11,5 @@ streamlink
 numpy
 scipy
 torch
+scikit-learn
+librosa
