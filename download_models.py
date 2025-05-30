@@ -1,24 +1,40 @@
 import os
 import gdown
+from pathlib import Path
 
-MODELS = {
-    "Real-Time-Voice-Cloning/encoder/saved_models/pretrained.pt":
-        "1f6YOa2Hrx5pKx68jDqzv3OrO18lJv7Yd",
-    "Real-Time-Voice-Cloning/synthesizer/saved_models/pretrained/pretrained.pt":
-        "1RPw5FvC6SOq2ogMZ1zknbaZt4A9y0bYy",
-    "Real-Time-Voice-Cloning/vocoder/saved_models/pretrained.pt":
-        "1uFPl3fF3HHgjg7I0kNv4a9U-kW5NBMZQ"
+# Cria diretórios, se não existirem
+Path("encoder/saved_models").mkdir(parents=True, exist_ok=True)
+Path("vocoder/saved_models").mkdir(parents=True, exist_ok=True)
+Path("synthesizer/saved_models/logs-pretrained/taco_pretrained").mkdir(parents=True, exist_ok=True)
+
+def download_if_missing(target_path, gdrive_url):
+    if not os.path.exists(target_path):
+        print(f"Downloading {target_path}...")
+        gdown.download(gdrive_url, target_path, quiet=False)
+    else:
+        print(f"Model {target_path} already exists.")
+
+# 1. Encoder
+download_if_missing(
+    "encoder/saved_models/pretrained.pt",
+    "https://drive.google.com/uc?id=1ExOFjsWzkEciECIRDKO5VNRoGW4978Hm"
+)
+
+# 2. Vocoder
+download_if_missing(
+    "vocoder/saved_models/pretrained.pt",
+    "https://drive.google.com/uc?id=1Z1BO5j104CtHpwl3oVIvNRtbDqUXGdZ9"
+)
+
+# 3. Synthesizer (taco_pretrained)
+# Baixa e extrai os três arquivos do modelo Tacotron
+taco_files = {
+    "checkpoint": "1l6pPeJNaF1Tt_s5xGyO3NQO-KXubnkfB",
+    "tacotron_model.ckpt-278000.index": "1IwhpyIbKDTDBwD3E_TzZJXxU8Y_1V1Hz",
+    "tacotron_model.ckpt-278000.meta": "1qg3MTZQrd7NLCYAEXV8n6YJErkGvmS9M",
+    "tacotron_model.ckpt-278000.data-00000-of-00001": "1WQurqcwFgn8xspBpVjWfjFJbtmLqGySH"
 }
 
-def download_file(target_path, file_id):
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    if not os.path.isfile(target_path):
-        print(f"Downloading {target_path}...")
-        url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, target_path, quiet=False)
-        print(f"Downloaded {target_path}")
-    else:
-        print(f"{target_path} already exists, skipping.")
-
-for path, file_id in MODELS.items():
-    download_file(path, file_id)
+for filename, file_id in taco_files.items():
+    path = f"synthesizer/saved_models/logs-pretrained/taco_pretrained/{filename}"
+    download_if_missing(path, f"https://drive.google.com/uc?id={file_id}")
