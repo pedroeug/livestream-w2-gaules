@@ -1,10 +1,11 @@
 import threading
+import os
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from capture.recorder import start_capture
-from pipeline.worker import worker_loop
-import download_models  # Baixa os modelos se ainda não existirem
+from Real-Time-Voice-Cloning.capture.recorder import start_capture
+from Real-Time-Voice-Cloning.pipeline.worker import worker_loop
+import Real-Time-Voice-Cloning.download_models  # Garante os modelos
 
 app = FastAPI()
 
@@ -17,9 +18,8 @@ def start_dub(req: StreamRequest, bg: BackgroundTasks):
     threading.Thread(target=worker_loop, daemon=True).start()
     return {"message": f"Dublagem com voz clone iniciada para {req.channel}"}
 
-# Monta os arquivos de saída da dublagem
-app.mount("/dub_hls", StaticFiles(directory="capture/dub_hls"), name="dub_hls")
+# Serve os arquivos da dublagem (HLS)
+app.mount("/dub_hls", StaticFiles(directory="Real-Time-Voice-Cloning/capture/dub_hls"), name="dub_hls")
 
-# Monta o frontend (React build)
+# Serve o frontend React build
 app.mount("/", StaticFiles(directory="frontend/build", html=True), name="frontend")
-
