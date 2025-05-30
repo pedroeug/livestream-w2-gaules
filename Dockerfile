@@ -1,16 +1,18 @@
-# Etapa 1: Build do Frontend
+# Etapa 1: build do frontend
 FROM node:18 AS frontend
 
 WORKDIR /frontend
 
-COPY COPY frontend/package.json ./
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm install
 
-COPY frontend/ ./
+COPY frontend/ .
 RUN npm run build
 
-# Etapa 2: Backend com Python
+# Etapa 2: build da imagem final com backend
 FROM python:3.10-slim
+
+ENV PORT=$PORT
 
 WORKDIR /app
 
@@ -18,23 +20,25 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
-    curl \
     gcc \
     libsndfile1 \
-    && apt-get clean
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Instala dependências Python
+# Copia e instala dependências Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia código-fonte
+# Copia os diretórios da aplicação
 COPY backend/ ./backend
 COPY capture/ ./capture
 COPY pipeline/ ./pipeline
+
+# Copia o frontend buildado
 COPY --from=frontend /frontend/build ./frontend/build
 
-# Define variáveis de ambiente
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
+# Expõe a porta esperada pelo Render
+EXPOSE $PORT
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Comando para iniciar a aplicação
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
