@@ -1,6 +1,11 @@
 import os
 import gdown
 
+# Garantir criação dos diretórios base
+os.makedirs("encoder/saved_models", exist_ok=True)
+os.makedirs("vocoder/saved_models", exist_ok=True)
+os.makedirs("synthesizer/saved_models/logs-pretrained/taco_pretrained", exist_ok=True)
+
 def ensure_dir_exists(path):
     if not os.path.exists(path):
         os.makedirs(path)
