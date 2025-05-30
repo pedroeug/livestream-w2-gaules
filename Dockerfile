@@ -1,44 +1,42 @@
-# Etapa 1: build do frontend
+# Etapa 1: constrói o frontend
 FROM node:18 AS frontend
 
 WORKDIR /frontend
 
-COPY frontend/package.json frontend/package-lock.json ./
+# Copia apenas o package.json para instalar dependências
+COPY frontend/package.json ./
 RUN npm install
 
+# Copia o restante do frontend e constrói
 COPY frontend/ .
 RUN npm run build
 
-# Etapa 2: build da imagem final com backend
+# Etapa 2: imagem final com backend
 FROM python:3.10-slim
-
-ENV PORT=$PORT
 
 WORKDIR /app
 
-# Instala dependências do sistema
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    git \
-    gcc \
-    libsndfile1 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Instala dependências do sistema (ex: ffmpeg, git, build tools)
+RUN apt-get update && \
+    apt-get install -y ffmpeg git curl build-essential && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python
+# Copia e instala dependências Python do projeto
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia os diretórios da aplicação
-COPY backend/ ./backend
-COPY capture/ ./capture
-COPY pipeline/ ./pipeline
+# Copia o restante do backend
+COPY backend/    ./backend
+COPY capture/    ./capture
+COPY pipeline/   ./pipeline
 
-# Copia o frontend buildado
+# Copia o frontend já buildado
 COPY --from=frontend /frontend/build ./frontend/build
 
-# Expõe a porta esperada pelo Render
+# Expõe a porta correta (Render usa a variável $PORT)
+ENV PORT=10000
 EXPOSE $PORT
 
-# Comando para iniciar a aplicação
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Comando para rodar o backend
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "10000"]
