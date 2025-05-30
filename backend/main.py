@@ -1,7 +1,13 @@
+import sys
 import threading
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# Garante que o script de download esteja disponível para importação
+sys.path.append("..")
+import download_models  # Baixa os modelos se ainda não existirem
+
 from capture.recorder import start_capture
 from pipeline.worker import worker_loop
 
@@ -17,4 +23,4 @@ def start_dub(req: StreamRequest, bg: BackgroundTasks):
     return {"message": f"Dublagem com voz clone iniciada para {req.channel}"}
 
 app.mount("/dub_hls", StaticFiles(directory="capture/dub_hls"), name="dub_hls")
-app.mount("/",   StaticFiles(directory="frontend/build", html=True), name="frontend")
+app.mount("/", StaticFiles(directory="frontend/build", html=True), name="frontend")
