@@ -1,3 +1,5 @@
+# requirements.txt
+
 fastapi
 uvicorn
 pydantic
@@ -12,4 +14,3 @@ torch
 scikit-learn
 librosa
 matplotlib
-webrtcvad
