@@ -1,47 +1,46 @@
-# Stage 1: build do frontend
-FROM node:18 AS frontend
+# Etapa 1: Build do frontend
+FROM node:18 AS frontend-builder
+
 WORKDIR /frontend
 
-# 1) copia package.json e instala dependências
 COPY frontend/package*.json ./
 RUN npm install
 
-# 2) coloca o index.html na raiz (necessário para Rollup/Vite)
-COPY frontend/public/index.html ./
-
-# 3) copia todo o resto do frontend
 COPY frontend/ ./
-
-# 4) build
 RUN npm run build
 
-# Stage 2: imagem final
+# Etapa 2: Build final com backend
 FROM python:3.10-slim
+
 WORKDIR /app
 
-# instala dependências do sistema
-RUN apt-get update && \
-    apt-get install -y ffmpeg streamlink git libsndfile1 build-essential && \
-    rm -rf /var/lib/apt/lists/*
+# Instala dependências de sistema
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    git \
+    gcc \
+    libsndfile1 \
+    curl \
+    && apt-get clean
 
-# copia e instala dependências Python
+# Instala dependências Python
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install python-dotenv tensorflow-cpu gdown
+RUN pip install --no-cache-dir -r requirements.txt
 
-# clona Voice-Cloning
-RUN git clone https://github.com/CorentinJ/Real-Time-Voice-Cloning.git /app/Real-Time-Voice-Cloning
-ENV PYTHONPATH="/app/Real-Time-Voice-Cloning:${PYTHONPATH}"
-
-# copia o código
+# Copia código-fonte do projeto
 COPY backend/    ./backend
 COPY capture/    ./capture
 COPY pipeline/   ./pipeline
 
-# copia o frontend buildado
-COPY --from=frontend /frontend/build ./frontend/build
+# Copia frontend buildado
+COPY --from=frontend-builder /frontend/build ./frontend/build
 
-# expõe a porta e define o start command
+# Define variáveis de ambiente
+ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
+
+# Expõe a porta para o Render detectar
 EXPOSE $PORT
-CMD ["sh", "-c", "python -c 'import download_models; download_models.main()' && uvicorn backend.main:app --host 0.0.0.0 --port $PORT"]
+
+# Comando para iniciar o backend
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
