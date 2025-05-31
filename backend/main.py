@@ -3,20 +3,20 @@
 import os
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-# Importa o módulo para garantir que o modelo Whisper esteja baixado
+# Importa o download de modelos Whisper
 from backend.download_models import download_all_models
 
-# Importa a função que inicia a captura de áudio da Twitch
+# Importa a captura de áudio da Twitch
 from capture.recorder import start_capture
 
-# Importa o loop de worker que faz transcrição (Whisper), tradução (DeepL),
-# síntese de voz (ElevenLabs) e montagem de HLS
+# Importa o worker que faz transcrição, tradução, síntese e HLS
 from pipeline.worker import worker_loop
 
 app = FastAPI()
 
-# Permitir CORS para qualquer origem (ajuste conforme sua necessidade)
+# Configura CORS para permitir qualquer origem (ajuste se necessário)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,44 +25,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Antes de qualquer coisa, baixa/verifica o modelo Whisper
+# Baixa/verifica o modelo Whisper ao iniciar
 download_all_models()
 
+# Monta o diretório 'frontend/dist' para servir arquivos estáticos do React
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 
-@app.get("/")
-async def root():
+
+@app.get("/health")
+async def health_check():
     """
-    Endpoint raiz apenas para verificar se o backend está funcionando.
+    Health check para verificar se o backend está funcionando.
     """
-    return {"message": "LiveDub backend está rodando"}
+    return {"status": "ok"}
 
 
 @app.post("/start/{channel}/{lang}")
 async def start_stream(channel: str, lang: str, background_tasks: BackgroundTasks):
     """
-    Inicia o processo de captura e processamento em segundo plano.
-
-    Parâmetros:
-    - channel: nome do canal Twitch (ex: "gaules")
-    - lang: código do idioma de saída para tradução/síntese (ex: "en", "pt", "es")
-
-    O processamento envolve:
-    1) Capturar áudio em segmentos de 10 segundos.
-    2) Transcrever cada segmento com Whisper.
-    3) Traduzir com DeepL.
-    4) Sintetizar voz com ElevenLabs.
-    5) Montar HLS com FFmpeg.
-
-    Retorna imediatamente um objeto informando que o processo foi disparado.
+    Inicia captura e processamento em segundo plano:
+    - start_capture grava áudio da Twitch em segmentos de 10s.
+    - worker_loop transcreve, traduz, sintetiza e monta HLS.
     """
-    # Pasta onde serão salvos os segmentos de áudio brutos
+    # Cria pasta para salvar segmentos de áudio brutos
     output_dir = os.path.join("audio_segments", channel)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Adiciona ao pool de tarefas em background a captura de áudio
+    # Dispara tarefas em background
     background_tasks.add_task(start_capture, channel, output_dir)
-
-    # Adiciona ao pool de tarefas em background o worker que processa cada segmento
     background_tasks.add_task(worker_loop, output_dir, lang)
 
     return {"status": "iniciado", "channel": channel, "lang": lang}
@@ -71,19 +61,6 @@ async def start_stream(channel: str, lang: str, background_tasks: BackgroundTask
 @app.post("/stop/{channel}")
 async def stop_stream(channel: str):
     """
-    Endpoint para interromper a captura/processamento de um canal.
-    Atualmente, essa função serve de placeholder, pois o processo de captura
-    é disparado em um subprocesso independente. Para interromper, seria necessário
-    monitorar e matar o processo Popen dentro de capture.recorder, ou usar um flag
-    de controle. Aqui retornamos apenas um status genérico.
+    Placeholder para parar captura e processamento de um canal.
     """
-    # Em projetos futuros, aqui poderíamos sinalizar para o recorder/worker parar
     return {"status": "parado", "channel": channel}
-
-
-@app.get("/health")
-async def health_check():
-    """
-    Endpoint para checagem de integridade (health check).
-    """
-    return {"status": "ok"}
