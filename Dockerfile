@@ -1,40 +1,50 @@
-FROM python:3.9-slim
+# livestream-w2-gaules/Dockerfile
+
+# --- Estágio 1: Construção do Frontend com Vite ---
+FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Instalar dependências do sistema
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    nodejs \
-    npm \
-    && rm -rf /var/lib/apt/lists/*
+# Copia package.json e limpa cache
+COPY frontend/package.json ./
+RUN npm cache clean --force
 
-# Instalar streamlink
-RUN pip install --no-cache-dir streamlink
+# Instala dependências do frontend
+RUN npm install --legacy-peer-deps --no-package-lock
 
-# Copiar arquivos do projeto
-COPY backend/ /app/backend/
-COPY capture/ /app/capture/
-COPY pipeline/ /app/pipeline/
-COPY frontend/ /app/frontend/
-COPY requirements.txt /app/
+# Copia todo o frontend e build
+COPY frontend/ ./
+RUN npm run build
 
-# Criar diretórios necessários
-RUN mkdir -p /app/hls/gaules/en
-RUN mkdir -p /app/audio_segments/gaules
+# --- Estágio 2: Imagem Final com Backend Python ---
+FROM python:3.11-slim
 
-# Construir o frontend
-WORKDIR /app/frontend
-RUN npm install && npm run build
-
-# Voltar para o diretório principal
 WORKDIR /app
 
-# Instalar dependências Python
+# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos e Streamlink
+RUN apt-get update && \
+    apt-get install -y ffmpeg git curl build-essential streamlink && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copia e instala dependências Python (requirements.txt já atualizado)
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expor porta
-EXPOSE 8000
+# Copia todo o código do backend, capture e pipeline
+COPY backend/ ./backend/
+COPY capture/ ./capture/
+COPY pipeline/ ./pipeline/
 
-# Comando para iniciar a aplicação
-CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Copia o frontend compilado do estágio anterior
+COPY --from=frontend /app/dist ./frontend/dist
+
+# Copia o script de inicialização e garante permissão
+COPY start.sh ./
+RUN chmod +x start.sh
+
+# Expõe a porta (Render define a variável $PORT automaticamente)
+ENV PORT=$PORT
+EXPOSE $PORT
+
+# Comando padrão ao iniciar o contêiner
+CMD ["bash", "start.sh"]
