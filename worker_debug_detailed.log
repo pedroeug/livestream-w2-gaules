@@ -1,0 +1,95 @@
+2025-05-31 16:27:25,903 - DEBUG - [DEBUG] Iniciando debug com arquivo: audio_segments/gaules/segment_000.wav, idioma: en
+2025-05-31 16:27:25,904 - DEBUG - [DEBUG] Iniciando processamento do segmento: audio_segments/gaules/segment_000.wav
+2025-05-31 16:27:25,904 - DEBUG - [DEBUG] Carregando modelo Whisper...
+2025-05-31 16:27:27,286 - DEBUG - [DEBUG] Modelo Whisper carregado com sucesso
+2025-05-31 16:27:27,287 - DEBUG - [DEBUG] Transcrevendo audio_segments/gaules/segment_000.wav com idioma forçado para português...
+2025-05-31 16:27:35,917 - DEBUG - [DEBUG] Transcrição concluída: que você é autor então
+2025-05-31 16:27:35,918 - DEBUG - [DEBUG] Preparando tradução para en...
+2025-05-31 16:27:35,918 - DEBUG - [DEBUG] Chave DeepL encontrada: 7304c...
+2025-05-31 16:27:35,918 - DEBUG - [DEBUG] Inicializando DeeplTranslator...
+2025-05-31 16:27:35,918 - DEBUG - [DEBUG] Traduzindo texto...
+2025-05-31 16:27:36,244 - ERROR - [DEBUG] Erro na API DeepL: ERR_BAD_REQUEST
+2025-05-31 16:27:36,246 - ERROR - [DEBUG] Traceback: Traceback (most recent call last):
+  File "/home/ubuntu/livestream-w2-gaules/pipeline/worker_debug.py", line 67, in process_single_segment
+    translated = translator.translate(text)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/dist-packages/deep_translator/deepl.py", line 89, in translate
+    raise ServerException(response.status_code)
+deep_translator.exceptions.ServerException: ERR_BAD_REQUEST
+
+2025-05-31 16:27:36,246 - DEBUG - [DEBUG] Usando texto original como fallback
+2025-05-31 16:27:36,247 - DEBUG - [DEBUG] Pulando síntese de voz e usando áudio original...
+2025-05-31 16:27:36,247 - DEBUG - [DEBUG] Convertendo WAV para MP3: audio_segments/gaules/segment_000.wav -> audio_segments/gaules/segment_000_debug.mp3
+2025-05-31 16:27:36,247 - DEBUG - [DEBUG] Executando comando ffmpeg: ffmpeg -y -i audio_segments/gaules/segment_000.wav -acodec libmp3lame -ar 16000 -ac 1 audio_segments/gaules/segment_000_debug.mp3
+2025-05-31 16:27:36,357 - DEBUG - [DEBUG] Saída do ffmpeg: 
+2025-05-31 16:27:36,357 - DEBUG - [DEBUG] Erro do ffmpeg: ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021 the FFmpeg developers
+  built with gcc 11 (Ubuntu 11.2.0-19ubuntu1)
+  configuration: --prefix=/usr --extra-version=0ubuntu0.22.04.1 --toolchain=hardened --libdir=/usr/lib/x86_64-linux-gnu --incdir=/usr/include/x86_64-linux-gnu --arch=amd64 --enable-gpl --disable-stripping --enable-gnutls --enable-ladspa --enable-libaom --enable-libass --enable-libbluray --enable-libbs2b --enable-libcaca --enable-libcdio --enable-libcodec2 --enable-libdav1d --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libjack --enable-libmp3lame --enable-libmysofa --enable-libopenjpeg --enable-libopenmpt --enable-libopus --enable-libpulse --enable-librabbitmq --enable-librubberband --enable-libshine --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libsrt --enable-libssh --enable-libtheora --enable-libtwolame --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx265 --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzmq --enable-libzvbi --enable-lv2 --enable-omx --enable-openal --enable-opencl --enable-opengl --enable-sdl2 --enable-pocketsphinx --enable-librsvg --enable-libmfx --enable-libdc1394 --enable-libdrm --enable-libiec61883 --enable-chromaprint --enable-frei0r --enable-libx264 --enable-shared
+  libavutil      56. 70.100 / 56. 70.100
+  libavcodec     58.134.100 / 58.134.100
+  libavformat    58. 76.100 / 58. 76.100
+  libavdevice    58. 13.100 / 58. 13.100
+  libavfilter     7.110.100 /  7.110.100
+  libswscale      5.  9.100 /  5.  9.100
+  libswresample   3.  9.100 /  3.  9.100
+  libpostproc    55.  9.100 / 55.  9.100
+Guessed Channel Layout for Input Stream #0.0 : stereo
+Input #0, wav, from 'audio_segments/gaules/segment_000.wav':
+  Metadata:
+    encoder         : Lavf58.76.100
+  Duration: 00:00:09.41, bitrate: 1536 kb/s
+  Stream #0:0: Audio: pcm_s16le ([1][0][0][0] / 0x0001), 48000 Hz, stereo, s16, 1536 kb/s
+Stream mapping:
+  Stream #0:0 -> #0:0 (pcm_s16le (native) -> mp3 (libmp3lame))
+Press [q] to stop, [?] for help
+Output #0, mp3, to 'audio_segments/gaules/segment_000_debug.mp3':
+  Metadata:
+    TSSE            : Lavf58.76.100
+  Stream #0:0: Audio: mp3, 16000 Hz, mono, s16p
+    Metadata:
+      encoder         : Lavc58.134.100 libmp3lame
+size=       0kB time=00:00:00.00 bitrate=N/A speed=   0x    size=      28kB time=00:00:09.39 bitrate=  24.5kbits/s speed= 224x    
+video:0kB audio:28kB subtitle:0kB other streams:0kB global headers:0kB muxing overhead: 0.789141%
+
+2025-05-31 16:27:36,357 - DEBUG - [DEBUG] Arquivo MP3 gerado com sucesso: audio_segments/gaules/segment_000_debug.mp3
+2025-05-31 16:27:36,357 - DEBUG - [DEBUG] Tamanho do arquivo: 28737 bytes
+2025-05-31 16:27:36,357 - DEBUG - [DEBUG] Criando diretório HLS: hls/gaules/en
+2025-05-31 16:27:36,358 - DEBUG - [DEBUG] Convertendo audio_segments/gaules/segment_000_debug.mp3 para HLS em hls/gaules/en/debug.m3u8 ...
+2025-05-31 16:27:36,358 - DEBUG - [DEBUG] Executando comando ffmpeg HLS: ffmpeg -y -i audio_segments/gaules/segment_000_debug.mp3 -c:a aac -b:a 128k -vn -hls_time 10 -hls_playlist_type event -hls_segment_filename hls/gaules/en/debug_%03d.ts hls/gaules/en/debug.m3u8
+2025-05-31 16:27:36,451 - DEBUG - [DEBUG] Saída do ffmpeg HLS: 
+2025-05-31 16:27:36,451 - DEBUG - [DEBUG] Erro do ffmpeg HLS: ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021 the FFmpeg developers
+  built with gcc 11 (Ubuntu 11.2.0-19ubuntu1)
+  configuration: --prefix=/usr --extra-version=0ubuntu0.22.04.1 --toolchain=hardened --libdir=/usr/lib/x86_64-linux-gnu --incdir=/usr/include/x86_64-linux-gnu --arch=amd64 --enable-gpl --disable-stripping --enable-gnutls --enable-ladspa --enable-libaom --enable-libass --enable-libbluray --enable-libbs2b --enable-libcaca --enable-libcdio --enable-libcodec2 --enable-libdav1d --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libjack --enable-libmp3lame --enable-libmysofa --enable-libopenjpeg --enable-libopenmpt --enable-libopus --enable-libpulse --enable-librabbitmq --enable-librubberband --enable-libshine --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libsrt --enable-libssh --enable-libtheora --enable-libtwolame --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx265 --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzmq --enable-libzvbi --enable-lv2 --enable-omx --enable-openal --enable-opencl --enable-opengl --enable-sdl2 --enable-pocketsphinx --enable-librsvg --enable-libmfx --enable-libdc1394 --enable-libdrm --enable-libiec61883 --enable-chromaprint --enable-frei0r --enable-libx264 --enable-shared
+  libavutil      56. 70.100 / 56. 70.100
+  libavcodec     58.134.100 / 58.134.100
+  libavformat    58. 76.100 / 58. 76.100
+  libavdevice    58. 13.100 / 58. 13.100
+  libavfilter     7.110.100 /  7.110.100
+  libswscale      5.  9.100 /  5.  9.100
+  libswresample   3.  9.100 /  3.  9.100
+  libpostproc    55.  9.100 / 55.  9.100
+Input #0, mp3, from 'audio_segments/gaules/segment_000_debug.mp3':
+  Metadata:
+    encoder         : Lavf58.76.100
+  Duration: 00:00:09.50, start: 0.069063, bitrate: 24 kb/s
+  Stream #0:0: Audio: mp3, 16000 Hz, mono, fltp, 24 kb/s
+Stream mapping:
+  Stream #0:0 -> #0:0 (mp3 (mp3float) -> aac (native))
+Press [q] to stop, [?] for help
+[aac @ 0x55ef33bd2f00] Too many bits 8192.000000 > 6144 per frame requested, clamping to max
+[mpegts @ 0x55ef33bf9f40] frame size not set
+Output #0, hls, to 'hls/gaules/en/debug.m3u8':
+  Metadata:
+    encoder         : Lavf58.76.100
+  Stream #0:0: Audio: aac (LC), 16000 Hz, mono, fltp, 96 kb/s
+    Metadata:
+      encoder         : Lavc58.134.100 aac
+size=N/A time=00:00:00.00 bitrate=N/A speed=   0x    [hls @ 0x55ef33bc5500] Opening 'hls/gaules/en/debug_000.ts' for writing
+[hls @ 0x55ef33bc5500] Opening 'hls/gaules/en/debug.m3u8.tmp' for writing
+size=N/A time=00:00:09.34 bitrate=N/A speed= 293x    
+video:0kB audio:68kB subtitle:0kB other streams:0kB global headers:0kB muxing overhead: unknown
+[aac @ 0x55ef33bd2f00] Qavg: 23214.533
+
+2025-05-31 16:27:36,452 - DEBUG - [DEBUG] Arquivo HLS gerado com sucesso: hls/gaules/en/debug.m3u8
+2025-05-31 16:27:36,452 - DEBUG - [DEBUG] Conteúdo do diretório HLS: ['debug_000.ts', 'debug.m3u8']
+2025-05-31 16:27:36,464 - DEBUG - [DEBUG] Processamento concluído com sucesso!

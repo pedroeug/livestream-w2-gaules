@@ -11,3 +11,6 @@ numpy
 matplotlib
 openai-whisper
 TTS
+
+
+python-dotenv
