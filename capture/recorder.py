@@ -25,7 +25,7 @@ def start_capture(channel_name: str, output_dir: str):
     logger.info(f"Diretório de saída garantido: {output_dir}")
 
     streamlink_cmd = [
-        "/usr/local/bin/streamlink",
+        "streamlink",
         "--twitch-disable-hosting",
         f"twitch.tv/{channel_name}",
         "best",
