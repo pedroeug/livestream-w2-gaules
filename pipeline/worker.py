@@ -26,6 +26,13 @@ def worker_loop(audio_dir: str, lang: str):
     if not elevenlabs_api_key or not eleven_voice_id:
         print("[worker] AVISO: ELEVENLABS_API_KEY ou ELEVENLABS_VOICE_ID não definido. TTS será pulado.")
 
+    # Captura credencial do DeepL via variável de ambiente
+    deepl_api_key = os.getenv("DEEPL_API_KEY")
+    if not deepl_api_key:
+        print("[worker] AVISO: DEEPL_API_KEY não definido. Tradução será pulada.")
+    else:
+        print(f"[worker] DeepL API Key configurada: {deepl_api_key[:5]}...{deepl_api_key[-3:]}")
+
     processed = set()
 
     while True:
@@ -38,20 +45,35 @@ def worker_loop(audio_dir: str, lang: str):
             print(f"[worker] Encontrou novo segmento: {wav_path}")
 
             try:
-                # 1) Transcrição com Whisper
-                print(f"[worker] Transcrevendo {wav_path} ...")
-                result = model.transcribe(wav_path)
+                # 1) Transcrição com Whisper - forçando idioma português
+                print(f"[worker] Transcrevendo {wav_path} com idioma forçado para português...")
+                result = model.transcribe(wav_path, language="pt", fp16=False)
                 text = result["text"].strip()
                 print(f"[worker] Transcrição: {text}")
 
+                # Se a transcrição estiver vazia, adicione um texto padrão
+                if not text:
+                    text = "Sem fala detectada neste segmento."
+                    print(f"[worker] Transcrição vazia, usando texto padrão: {text}")
+
                 # 2) Tradução com DeepL
-                print(f"[worker] Traduzindo para {lang} ...")
-                translator = DeeplTranslator(source="auto", target=lang)
-                translated = translator.translate(text)
-                print(f"[worker] Tradução: {translated}")
+                if deepl_api_key and text:
+                    print(f"[worker] Traduzindo para {lang} ...")
+                    try:
+                        translator = DeeplTranslator(source="pt", target=lang, api_key=deepl_api_key)
+                        translated = translator.translate(text)
+                        print(f"[worker] Tradução: {translated}")
+                    except Exception as e:
+                        print(f"[worker] Erro na tradução DeepL: {e}")
+                        print("[worker] Usando texto original como fallback")
+                        translated = text
+                else:
+                    print("[worker] Pulando tradução: API key não configurada ou texto vazio.")
+                    processed.add(filename)
+                    continue
 
                 # 3) Síntese de voz com ElevenLabs (via HTTP)
-                if elevenlabs_api_key and eleven_voice_id:
+                if elevenlabs_api_key and eleven_voice_id and translated:
                     print(f"[worker] Sintetizando texto traduzido com ElevenLabs ...")
                     tts_endpoint = f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice_id}"
                     headers = {
@@ -76,7 +98,7 @@ def worker_loop(audio_dir: str, lang: str):
                         processed.add(filename)
                         continue
                 else:
-                    print("[worker] Pulando síntese ElevenLabs: credenciais não configuradas.")
+                    print("[worker] Pulando síntese ElevenLabs: credenciais não configuradas ou texto vazio.")
                     processed.add(filename)
                     continue
 
