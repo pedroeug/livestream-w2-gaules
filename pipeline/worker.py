@@ -6,7 +6,7 @@ import whisper
 from deep_translator import DeeplTranslator
 import subprocess
 
-# Importamos o Coqui TTS
+# Importamos Coqui TTS
 from TTS.api import TTS
 
 
@@ -16,18 +16,14 @@ def worker_loop(audio_dir: str, lang: str):
       1. Monitora novos arquivos .wav em audio_dir.
       2. Transcreve usando Whisper.
       3. Traduz a transcrição (DeepL).
-      4. Síntese de voz (Coqui TTS).
-      5. Empacota em HLS (.ts + index.m3u8) em hls/{channel}/{lang}/.
+      4. Sintetiza texto em áudio com Coqui TTS.
+      5. Converte em HLS (.ts + index.m3u8) em hls/{channel}/{lang}/.
     """
 
-    # 1) Carrega o modelo Whisper
+    # Carrega o modelo Whisper
     model = whisper.load_model("base")
 
-    # 2) Inicializa o Coqui TTS de acordo com a língua desejada
-    #    Mapeamos 'lang' para um modelo Coqui. Por exemplo:
-    #    - 'en' ou 'en-US' → tts_models/en/vctk/vits
-    #    - 'pt' ou 'pt-BR' → tts_models/pt/mai/tacotron2-DDC
-    #    Caso contrário, usa um modelo default (em inglês).
+    # Mapeia lang → modelo Coqui
     TTS_MODEL_MAP = {
         "en": "tts_models/en/vctk/vits",
         "en-US": "tts_models/en/vctk/vits",
@@ -43,7 +39,6 @@ def worker_loop(audio_dir: str, lang: str):
     processed = set()
 
     while True:
-        # Lista todos os arquivos .wav ainda não processados
         for filename in sorted(os.listdir(audio_dir)):
             if not filename.endswith(".wav") or filename in processed:
                 continue
@@ -58,7 +53,7 @@ def worker_loop(audio_dir: str, lang: str):
                 text = result["text"].strip()
                 print(f"[worker] Transcrição: {text}")
 
-                # 2) Tradução com DeepL (ou mantém texto original, se lang='en')
+                # 2) Tradução (se necessário)
                 if lang != "en":
                     print(f"[worker] Traduzindo para '{lang}' ...")
                     translator = DeeplTranslator(source="auto", target=lang)
@@ -68,11 +63,9 @@ def worker_loop(audio_dir: str, lang: str):
                     translated = text
                     print("[worker] Idioma 'en' selecionado, pulando tradução.")
 
-                # 3) Síntese de voz com Coqui TTS
+                # 3) Síntese de áudio com Coqui TTS
                 print(f"[worker] Sintetizando texto com Coqui TTS ...")
-                # Definimos o arquivo de saída TTS (WAV) no mesmo diretório que o .wav original
                 output_wav = wav_path.replace(".wav", f"_{lang}.wav")
-                # Gera o TTS e grava diretamente em output_wav
                 tts.tts_to_file(text=translated, file_path=output_wav)
                 print(f"[worker] Áudio sintetizado salvo em {output_wav}")
 
@@ -98,12 +91,10 @@ def worker_loop(audio_dir: str, lang: str):
                 subprocess.run(ffmpeg_cmd, check=True)
                 print(f"[worker] HLS gerado em {output_index}")
 
-                # Marca este segmento como processado
                 processed.add(filename)
 
             except Exception as e:
-                # Em caso de erro, marca como processado para não travar em loop infinito
                 print(f"[worker] Erro ao processar {wav_path}: {e}")
                 processed.add(filename)
 
-        time.sleep(1)  # Espera 1 segundo antes de checar novamente
+        time.sleep(1)
