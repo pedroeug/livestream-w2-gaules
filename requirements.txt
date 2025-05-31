@@ -1,14 +1,11 @@
 fastapi
 uvicorn[standard]
-openai
 requests
 deep_translator
+Coqui-tts
 ffmpeg-python
 python-multipart
 pydantic
 aiohttp
 numpy
-matplotlib
 openai-whisper
-TTS
-librosa
