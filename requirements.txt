@@ -1,15 +1,12 @@
-# requirements.txt
+# livestream-w2-gaules/requirements.txt
 
 fastapi
 uvicorn[standard]
-openai
+openai-whisper
 requests
-deep_translator
-elevenlabs
-ffmpeg-python
+deep-translator
 python-multipart
 pydantic
 aiohttp
 numpy
 matplotlib
-openai-whisper
