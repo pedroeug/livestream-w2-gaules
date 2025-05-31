@@ -5,7 +5,7 @@ FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia apenas package.json (sem package-lock.json) e limpa cache
+# Copia package.json e limpa cache
 COPY frontend/package.json ./
 RUN npm cache clean --force
 
@@ -16,27 +16,42 @@ RUN npm install --legacy-peer-deps --no-package-lock
 COPY frontend/ ./
 RUN npm run build
 
-
 # --- Estágio 2: Imagem Final com Backend Python ---
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos, Streamlink
+# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos, Streamlink e as libs de TTS
 RUN apt-get update && \
-    apt-get install -y ffmpeg git curl build-essential streamlink && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get install -y \
+      ffmpeg \
+      git \
+      curl \
+      build-essential \
+      streamlink \
+      libsndfile1 \
+      libportaudio2 \
+      libcurl4-openssl-dev \
+      libatlas-base-dev \
+      libblas-dev \
+      libasound2-dev \
+      libjack-jackd2-0 \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python (certifique-se de que seu requirements.txt inclua "TTS" para Coqui TTS)
+# Copia e instala dependências Python
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Cria diretórios básicos
+RUN mkdir -p audio_segments hls
 
 # Copia todo o código do backend, capture e pipeline
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia a pasta com a amostra de voz do Gaules para voice-cloning
+# Copia a pasta de assets (sample de voz) para dentro do container
 COPY assets/voices/ ./assets/voices/
 
 # Copia o frontend compilado do estágio anterior
@@ -46,9 +61,9 @@ COPY --from=frontend /app/dist ./frontend/dist
 COPY start.sh ./
 RUN chmod +x start.sh
 
-# Define variável de ambiente e expõe a porta
-ENV PORT=$PORT
-EXPOSE $PORT
+# Define variável de ambiente e expõe a porta (padrão: 8000)
+ENV PORT=8000
+EXPOSE 8000
 
 # Comando padrão ao iniciar o contêiner
 CMD ["bash", "start.sh"]
