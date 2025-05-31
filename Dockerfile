@@ -21,9 +21,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO (FFmpeg, Git, Curl, compiladores básicos)
+# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos e Streamlink
 RUN apt-get update && \
-    apt-get install -y ffmpeg git curl build-essential && \
+    apt-get install -y ffmpeg git curl build-essential streamlink && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copia e instala dependências Python
@@ -35,7 +35,7 @@ COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia o frontend compilado do estágio anterior (pasta /app/dist)
+# Copia o frontend compilado do estágio anterior
 COPY --from=frontend /app/dist ./frontend/dist
 
 # Copia o script de inicialização e garante permissão
