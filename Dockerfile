@@ -5,28 +5,29 @@ FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia package.json e limpa cache
+# Copia apenas package.json (sem package-lock.json) e limpa cache
 COPY frontend/package.json ./
 RUN npm cache clean --force
 
-# Instala dependências do frontend
+# Instala dependências do frontend sem gerar package-lock.json
 RUN npm install --legacy-peer-deps --no-package-lock
 
-# Copia todo o frontend e build
+# Copia todo o código do frontend e executa o build
 COPY frontend/ ./
 RUN npm run build
+
 
 # --- Estágio 2: Imagem Final com Backend Python ---
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos e Streamlink
+# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos, Streamlink
 RUN apt-get update && \
     apt-get install -y ffmpeg git curl build-essential streamlink && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python (requirements.txt já atualizado)
+# Copia e instala dependências Python (certifique-se de que seu requirements.txt inclua "TTS" para Coqui TTS)
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -35,6 +36,9 @@ COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
+# Copia a pasta com a amostra de voz do Gaules para voice-cloning
+COPY assets/voices/ ./assets/voices/
+
 # Copia o frontend compilado do estágio anterior
 COPY --from=frontend /app/dist ./frontend/dist
 
@@ -42,7 +46,7 @@ COPY --from=frontend /app/dist ./frontend/dist
 COPY start.sh ./
 RUN chmod +x start.sh
 
-# Expõe a porta (Render define a variável $PORT automaticamente)
+# Define variável de ambiente e expõe a porta
 ENV PORT=$PORT
 EXPOSE $PORT
 
