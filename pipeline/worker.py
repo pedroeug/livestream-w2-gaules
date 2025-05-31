@@ -3,191 +3,124 @@
 import os
 import time
 import whisper
+import logging
+import subprocess
 from deep_translator import DeeplTranslator
 import requests
-import subprocess
-import shutil
-import logging
 
-# Configura logging simples
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("worker")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
-
-def worker_loop(audio_dir: str, lang: str):
-    """
-    Loop contínuo que:
-      1. Monitora novos arquivos .wav em audio_dir.
-      2. Transcreve usando Whisper.
-      3. Traduz a transcrição (DeepL via deep_translator).
-      4. Síntese de voz (Coqui TTS via REST).
-      5. Concatena pedacinhos de MP3 em um único arquivo contínuo (concat.mp3).
-      6. Empacota em HLS (.ts + index.m3u8) em hls/{channel}/{lang}/.
-    """
-
-    # 1) Carrega modelo Whisper
+def worker_loop(audio_dir: str, processed_dir: str, lang: str, hls_dir: str):
     model = whisper.load_model("base")
-    processed = set()
 
-    # PASTA onde colocamos os MP3s processados para concatenação
-    processed_dir = os.path.join(audio_dir, "processed")
-    os.makedirs(processed_dir, exist_ok=True)
+    coqui_api_key = os.getenv("COQUI_API_KEY")
+    if not coqui_api_key:
+        logger.warning("COQUI_API_KEY não definido. Não será possível usar Coqui TTS.")
 
-    # Arquivo contínuo que vai somar todos os segmentos em MP3:
-    concat_mp3_path = os.path.join(processed_dir, "concat.mp3")
+    voice_sample_path = "backend/assets/voices/gaules_sample.wav"
 
-    # Caminho fixo do sample para clonagem de voz no Coqui:
-    coqui_speaker_wav = os.path.join("assets", "voices", "gaules_sample.wav")
+    concat_mp3 = os.path.join(processed_dir, "concat.mp3")
+    if not os.path.exists(concat_mp3):
+        silence_cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
+            "-t", "1",
+            "-q:a", "9",
+            "-acodec", "libmp3lame",
+            concat_mp3
+        ]
+        subprocess.run(silence_cmd, check=True)
+        logger.info(f"Arquivo inicial de concat.mp3 criado em {concat_mp3}")
+
+    processed_wavs = set()
 
     while True:
         for filename in sorted(os.listdir(audio_dir)):
-            # só processa arquivos WAV originais (p. ex. segment_000.wav)
-            if not filename.endswith(".wav") or filename in processed:
+            if not filename.endswith(".wav") or filename in processed_wavs:
                 continue
 
             wav_path = os.path.join(audio_dir, filename)
             logger.info(f"Processando segmento: {wav_path}")
 
             try:
-                # 2) Transcrição
                 logger.info(f"Transcrevendo {wav_path} com idioma forçado para português...")
                 result = model.transcribe(wav_path, language="pt")
-                text = result["text"].strip()
-                logger.info(f"Transcrição: {text}")
+                original_text = result["text"].strip()
+                logger.info(f"Transcrição: {original_text}")
 
-                # 3) Tradução com DeepL (deep_translator)
-                try:
-                    logger.info(f"Traduzindo para {lang} ...")
-                    translator = DeeplTranslator(source="auto", target=lang)
-                    translated = translator.translate(text)
-                    logger.info(f"Tradução: {translated}")
-                except Exception as e_translate:
-                    logger.error(f"Erro ao traduzir via DeepL: {e_translate}")
-                    # marca como processado e pula para o próximo
-                    processed.add(filename)
-                    continue
+                logger.info(f"Traduzindo para {lang} ...")
+                translator = DeeplTranslator(source="pt", target=lang)
+                translated = translator.translate(original_text)
+                logger.info(f"Tradução: {translated}")
 
-                # 4) Síntese de voz com Coqui TTS
-                output_wav = wav_path.replace(".wav", f"_{lang}.wav")
+                logger.info("Sintetizando texto traduzido com Coqui TTS ...")
+                data = {"text": translated, "voice": "tts_models/multilingual/vctk/vits"} if lang == "en" else {"text": translated, "voice": "tts_models/en/ljspeech"}
+                headers = {"accept": "application/json", "xi-api-key": coqui_api_key}
 
-                if lang == "en":
-                    logger.info("Sintetizando texto traduzido com Coqui TTS (clonagem de voz)...")
-                    coqui_endpoint = "https://app.coqui.ai/tts/inference"
-                    headers = {
-                        "Content-Type": "application/json",
-                    }
-                    payload = {
-                        "text": translated,
-                        "voice_cloning": True,
-                        "speaker_wav": coqui_speaker_wav,
-                    }
-                    response = requests.post(coqui_endpoint, json=payload, headers=headers)
-                    if response.status_code == 200:
-                        with open(output_wav, "wb") as f:
-                            f.write(response.content)
-                        logger.info(f"Áudio sintetizado salvo em {output_wav}")
-                    else:
-                        logger.error(f"Erro Coqui TTS ({response.status_code}): {response.text}")
-                        processed.add(filename)
-                        continue
-
+                response = requests.post("https://api.coqui.ai/tts/inference", headers=headers, json=data)
+                if response.status_code == 200:
+                    synthesized_wav = os.path.join(processed_dir, filename.replace(".wav", f"_{lang}.wav"))
+                    with open(synthesized_wav, "wb") as f:
+                        f.write(response.content)
+                    logger.info(f"Áudio sintetizado salvo em {synthesized_wav}")
                 else:
-                    logger.info(f"Sintetizando texto traduzido com Coqui TTS (voz padrão) para idioma {lang} ...")
-                    coqui_endpoint = "https://app.coqui.ai/tts/inference"
-                    headers = {
-                        "Content-Type": "application/json",
-                    }
-                    payload = {
-                        "text": translated,
-                        "voice": "multi-lingual",
-                    }
-                    response = requests.post(coqui_endpoint, json=payload, headers=headers)
-                    if response.status_code == 200:
-                        with open(output_wav, "wb") as f:
-                            f.write(response.content)
-                        logger.info(f"Áudio sintetizado salvo em {output_wav}")
-                    else:
-                        logger.error(f"Erro Coqui TTS ({response.status_code}): {response.text}")
-                        processed.add(filename)
-                        continue
+                    raise RuntimeError(f"Coqui TTS retornou {response.status_code}: {response.text}")
 
-                # 5) Converte o WAV sintetizado para MP3
-                dubbed_mp3 = output_wav.replace(".wav", ".mp3")  # ex: segment_000_en.mp3
-                logger.info(f"Convertendo WAV para MP3: {output_wav} -> {dubbed_mp3}")
-                ffmpeg_to_mp3 = [
+                mp3_filename = filename.replace(".wav", f"_{lang}.mp3")
+                mp3_path = os.path.join(processed_dir, mp3_filename)
+                logger.info(f"Convertendo WAV para MP3: {synthesized_wav} → {mp3_path}")
+                convert_cmd = [
                     "ffmpeg", "-y",
-                    "-i", output_wav,
+                    "-i", synthesized_wav,
                     "-codec:a", "libmp3lame",
                     "-b:a", "128k",
-                    dubbed_mp3
+                    mp3_path
                 ]
-                subprocess.run(ffmpeg_to_mp3, check=True)
-                logger.info(f"Arquivo convertido para MP3: {dubbed_mp3}")
+                subprocess.run(convert_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                logger.info(f"Arquivo convertido para MP3: {mp3_path}")
 
-                # Move o MP3 recém-gerado para a pasta `processed_dir`
-                target_dubbed_mp3 = os.path.join(processed_dir, os.path.basename(dubbed_mp3))
-                shutil.move(dubbed_mp3, target_dubbed_mp3)
-                logger.info(f"Movido para pasta processed: {target_dubbed_mp3}")
-
-                # 6) Concatena ao arquivo contínuo concat.mp3
-                if not os.path.exists(concat_mp3_path):
-                    # Se não existir ainda, basta renomear este primeiro MP3 para concat.mp3
-                    os.replace(target_dubbed_mp3, concat_mp3_path)
-                    logger.info(f"Criado arquivo contínuo inicial: {concat_mp3_path}")
-                else:
-                    # Se já existir concat.mp3, faz concat adequado:
-                    temp_concat = os.path.join(processed_dir, "concat_tmp.mp3")
-                    concat_input = f"concat:{concat_mp3_path}|{target_dubbed_mp3}"
-                    logger.info(f"Adicionando segmento ao arquivo contínuo: {concat_mp3_path}")
-                    ffmpeg_concat = [
-                        "ffmpeg", "-y",
-                        "-i", concat_input,
-                        "-acodec", "copy",
-                        temp_concat
-                    ]
-                    try:
-                        subprocess.run(ffmpeg_concat, check=True)
-                        # Se tudo der certo, substitui o antigo concat.mp3
-                        os.replace(temp_concat, concat_mp3_path)
-                        logger.info(f"Arquivo contínuo atualizado em: {concat_mp3_path}")
-                    except subprocess.CalledProcessError as cpe:
-                        logger.error(f"Erro ao executar ffmpeg concat: {cpe}")
-                        # Se o temp_concat foi criado parcialmente, remove-o
-                        if os.path.exists(temp_concat):
-                            os.remove(temp_concat)
-                        processed.add(filename)
-                        continue
-
-                # 7) Empacotar em HLS via ffmpeg usando o MP3 isolado (target_dubbed_mp3)
-                channel = os.path.basename(audio_dir)
-                hls_dir = os.path.join("hls", channel, lang)
-                os.makedirs(hls_dir, exist_ok=True)
-
-                # Use o arquivo MP3 recém-gerado para criar segmentos HLS de 10s:
-                input_for_hls = target_dubbed_mp3
-                ts_pattern = os.path.join(hls_dir, "%03d.ts")
-                output_index = os.path.join(hls_dir, "index.m3u8")
-
-                logger.info(f"Convertendo {input_for_hls} para HLS em {output_index} ...")
-                ffmpeg_hls = [
+                new_concat = os.path.join(processed_dir, "concat.mp3.temp")
+                concat_cmd = [
                     "ffmpeg", "-y",
-                    "-i", input_for_hls,
-                    "-c:a", "aac", "-b:a", "128k",
+                    "-i", f"concat:{concat_mp3}|{mp3_path}",
+                    "-c", "copy",
+                    new_concat
+                ]
+                try:
+                    subprocess.run(concat_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    os.replace(new_concat, concat_mp3)
+                    logger.info(f"Adicionou {mp3_path} a {concat_mp3}")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"Erro ao executar ffmpeg concat: {e.stderr.decode().strip()}")
+                    if os.path.exists(new_concat):
+                        os.remove(new_concat)
+
+                hls_index = os.path.join(hls_dir, "index.m3u8")
+                ts_pattern = os.path.join(hls_dir, "%03d.ts")
+
+                hls_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", concat_mp3,
+                    "-c:a", "aac",
+                    "-b:a", "128k",
                     "-vn",
                     "-hls_time", "10",
                     "-hls_playlist_type", "event",
                     "-hls_segment_filename", ts_pattern,
-                    output_index
+                    hls_index
                 ]
-                subprocess.run(ffmpeg_hls, check=True)
-                logger.info(f"HLS gerado em {output_index}")
+                subprocess.run(hls_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                logger.info(f"HLS atualizado em {hls_index}")
 
-                # Finalmente, marca este segmento como processado
-                processed.add(filename)
+                processed_wavs.add(filename)
 
             except Exception as e:
                 logger.error(f"Erro ao processar {wav_path}: {e}")
-                processed.add(filename)
+                processed_wavs.add(filename)
 
-        # Aguarda um segundo antes de checar novamente novos WAVs
         time.sleep(1)
