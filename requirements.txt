@@ -10,8 +10,5 @@ aiohttp
 numpy
 matplotlib
 openai-whisper
-
-# Coqui TTS (voice-cloning)
 TTS
-torch
-soundfile
+librosa
