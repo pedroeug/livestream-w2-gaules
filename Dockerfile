@@ -3,9 +3,9 @@ FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia package.json e package-lock.json e instala dependências
+# Copia package.json e package-lock.json (se existir) e instala dependências
 COPY frontend/package*.json ./
-RUN npm cache clean --force && npm ci
+RUN npm install --legacy-peer-deps --force
 
 # Copia todo o código do frontend (inclui index.html) e executa o build
 COPY frontend/ ./
