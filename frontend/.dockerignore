@@ -1,0 +1,10 @@
+# Ignorar node_modules e package-lock.json no build do Docker
+frontend/node_modules
+frontend/package-lock.json
+frontend/yarn.lock
+
+# Ignorar pastas locais de log, caches, etc.
+*.log
+__pycache__/
+*.pyc
+.env*
