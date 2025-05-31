@@ -1,70 +1,71 @@
 // livestream-w2-gaules/frontend/src/App.jsx
 
-import React, { useState, useEffect, useRef } from 'react'
-import Hls from 'hls.js'
+import React, { useState, useRef, useEffect } from 'react';
+import Hls from 'hls.js';
 
-export default function App() {
-  const [channel, setChannel] = useState('gaules')
-  const [lang, setLang] = useState('en')
-  const [isProcessing, setIsProcessing] = useState(false)
-  const videoRef = useRef(null)
+const App = () => {
+  const [channel, setChannel] = useState('gaules');
+  const [lang, setLang] = useState('en');
+  const videoRef = useRef(null);
+  const hlsRef = useRef(null);
 
-  // Esta função dispara o pipeline no backend
-  async function startPipeline(channelName, language) {
+  // Função para iniciar o pipeline no backend
+  const startPipeline = async () => {
     try {
-      setIsProcessing(true)
-      // Envia um POST para /start/{channel}/{lang}
-      const res = await fetch(
-        `${window.location.origin}/start/${encodeURIComponent(channelName)}/${encodeURIComponent(language)}`,
-        { method: 'POST' }
-      )
+      const url = `${window.location.origin}/start/${encodeURIComponent(channel)}/${encodeURIComponent(lang)}`;
+      const res = await fetch(url, { method: 'POST' });  // ← aqui é crucial: método POST
       if (!res.ok) {
-        console.error('Falha ao iniciar pipeline:', res.status, res.statusText)
+        console.error('Falha ao iniciar pipeline:', res.status, res.statusText);
+      } else {
+        console.log('Pipeline iniciado com sucesso para', channel, lang);
       }
     } catch (err) {
-      console.error('Erro na chamada /start:', err)
-    } finally {
-      // Após disparar, mantemos "processando" por causa do delay antes do HLS
-      // (mas mesmo que falhe, tentamos carregar o HLS abaixo)
+      console.error('Erro na chamada /start:', err);
     }
-  }
+  };
 
-  // Sempre que canal ou idioma mudarem, disparamos o pipeline e depois inicializamos o HLS
-  useEffect(() => {
-    if (!videoRef.current) return
-
-    // 1) Dispara o pipeline no backend
-    startPipeline(channel, lang)
-
-    // 2) Faz um pequeno delay antes de tentar inicializar o Hls.js
-    //    para dar tempo do backend gerar o index.m3u8 + ts segments.
-    //    Ajuste esse valor conforme a performance do seu pipeline (ex.: 10000 a 20000 ms).
-    const DELAY_MS = 15000
-    const timer = setTimeout(() => {
-      const hlsUrl = `${window.location.origin}/hls/${encodeURIComponent(channel)}/${encodeURIComponent(lang)}/index.m3u8`
-
-      if (Hls.isSupported()) {
-        const hls = new Hls()
-        hls.loadSource(hlsUrl)
-        hls.attachMedia(videoRef.current)
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoRef.current.play().catch(() => {
-            /* Sem problemas se autoplay falhar */
-          })
-        })
-      } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-        videoRef.current.src = hlsUrl
+  // Função para tentar carregar o HLS repetidamente até encontrar a playlist
+  const attachHls = () => {
+    const playlistUrl = `${window.location.origin}/hls/${encodeURIComponent(channel)}/${encodeURIComponent(lang)}/index.m3u8`;
+    if (videoRef.current) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
       }
-      setIsProcessing(false)
-    }, DELAY_MS)
+      const hls = new Hls();
+      hlsRef.current = hls;
+      hls.loadSource(playlistUrl);
+      hls.attachMedia(videoRef.current);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log('HLS manifest carregado, iniciando playback');
+        videoRef.current.play();
+      });
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response && data.response.code === 404) {
+          console.warn('Playlist não encontrada ainda, tentando novamente em 3s...');
+          setTimeout(attachHls, 3000);
+        } else {
+          console.error('Erro HLS.js:', data);
+        }
+      });
+    }
+  };
 
-    // Se o usuário mudar canal/idioma antes do timer, limpa o timer antigo
-    return () => clearTimeout(timer)
-  }, [channel, lang])
+  // Sempre que o usuário clicar em “Start” ou mudar canal/idioma, reiniciamos o processo
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+    }
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    // Tenta iniciar novamente somente se já tivermos feito o POST
+    // (pressionando o botão “Start Pipeline”)
+  }, [channel, lang]);
 
   return (
-    <div style={{ padding: '1rem', fontFamily: 'Arial, sans-serif' }}>
-      <h1>LiveDub – Twitch Dubbing</h1>
+    <div style={{ padding: '1rem', fontFamily: 'sans-serif' }}>
+      <h1>LiveDub para Twitch</h1>
 
       <div style={{ marginBottom: '1rem' }}>
         <label>
@@ -72,39 +73,45 @@ export default function App() {
           <input
             type="text"
             value={channel}
-            onChange={e => setChannel(e.target.value.trim())}
-            placeholder="gaules"
-            style={{ marginRight: '1rem' }}
+            onChange={(e) => setChannel(e.target.value.trim())}
+            placeholder="Digite o nome do canal"
           />
         </label>
+      </div>
+
+      <div style={{ marginBottom: '1rem' }}>
         <label>
-          Idioma:{' '}
-          <select value={lang} onChange={e => setLang(e.target.value)}>
-            <option value="en">Inglês</option>
-            <option value="pt">Português</option>
-            <option value="es">Espanhol</option>
+          Idioma de saída:{' '}
+          <select value={lang} onChange={(e) => setLang(e.target.value)}>
+            <option value="en">Inglês (en)</option>
+            <option value="pt">Português (pt)</option>
+            <option value="es">Espanhol (es)</option>
           </select>
         </label>
       </div>
 
-      {isProcessing && (
-        <div style={{ marginBottom: '1rem', color: '#555' }}>
-          Iniciando pipeline e gerando HLS… aguarde alguns segundos antes de o vídeo aparecer.
-        </div>
-      )}
+      <div style={{ marginBottom: '1rem' }}>
+        <button
+          onClick={() => {
+            startPipeline().then(() => {
+              // Depois que o POST retornar 200, começamos a checar o HLS
+              attachHls();
+            });
+          }}
+        >
+          Iniciar Pipeline
+        </button>
+      </div>
 
-      <video
-        ref={videoRef}
-        controls
-        style={{
-          width: '100%',
-          maxWidth: '720px',
-          border: '1px solid #ccc',
-          borderRadius: '8px',
-        }}
-      >
-        Seu navegador não suporta vídeo HLS.
-      </video>
+      <div>
+        <video
+          ref={videoRef}
+          controls
+          style={{ width: '100%', maxWidth: '800px', border: '1px solid #ccc' }}
+        />
+      </div>
     </div>
-  )
-}
+  );
+};
+
+export default App;
