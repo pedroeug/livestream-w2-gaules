@@ -1,39 +1,28 @@
 # livestream-w2-gaules/backend/main.py
 
 import os
-import logging
-import multiprocessing
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from multiprocessing import Process
+import logging
 
-from backend.download_models import download_all_models
+# Ajuste de logging para exibir mensagens de INFO nos subprocessos
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
+logger = logging.getLogger("backend")
+
+# Importa as funções de download de modelos, captura e worker
+from download_models import download_all_models
 from capture.recorder import start_capture
 from pipeline.worker import worker_loop
 
-# —————————————————————————————————————————————————————————————————————————————
-# CONFIGURAÇÃO DE LOGGING
-# —————————————————————————————————————————————————————————————————————————————
-logger = logging.getLogger("backend")
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-
-# —————————————————————————————————————————————————————————————————————————————
-# GARANTE CRIAÇÃO DAS PASTAS NECESSÁRIAS PARA HLS E AUDIO_SEGMENTS
-# —————————————————————————————————————————————————————————————————————————————
-os.makedirs("hls", exist_ok=True)
-os.makedirs("audio_segments", exist_ok=True)
-logger.info("Pastas iniciais criadas/verificadas: 'hls/', 'audio_segments/'.")
-
 app = FastAPI()
 
-# —————————————————————————————————————————————————————————————————————————————
-# CORS (ajuste allow_origins se quiser restringir)
-# —————————————————————————————————————————————————————————————————————————————
+# Configura CORS (ajuste allow_origins conforme necessário)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,115 +31,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# —————————————————————————————————————————————————————————————————————————————
-# EVENTO DE STARTUP: baixar/verificar modelos Whisper
-# —————————————————————————————————————————————————————————————————————————————
-@app.on_event("startup")
-async def on_startup():
-    download_all_models()
-    logger.info("Modelos Whisper verificados/baixados no startup.")
+# Baixa/verifica o modelo Whisper assim que o servidor sobe
+download_all_models()
 
+# Garante que a pasta 'hls' exista antes de montá-la como StaticFiles
+os.makedirs("hls", exist_ok=True)
 
-# —————————————————————————————————————————————————————————————————————————————
-# MONTAGEM DOS ARQUIVOS HLS 
-# —————————————————————————————————————————————————————————————————————————————
-# (Como já garantimos que 'hls/' existe acima, não haverá erro de "directory does not exist".)
+# Monta o diretório 'hls' para servir arquivos HLS (.m3u8 e .ts)
 app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
 
+# Garante que o frontend compilado exista; monte 'frontend/dist' para servir o React
+os.makedirs("frontend/dist", exist_ok=True)  # só para garantir, caso ainda não tenha sido copiado
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 
-# —————————————————————————————————————————————————————————————————————————————
-# ENDPOINTS DA API
-# —————————————————————————————————————————————————————————————————————————————
 
 @app.get("/health")
 async def health_check():
     """
-    Health check para verificar se o backend está funcionando.
+    Endpoint de health check para verificar se o backend está no ar.
     """
     return {"status": "ok"}
 
 
 @app.post("/start/{channel}/{lang}")
-async def start_stream(channel: str, lang: str):
+async def start_pipeline(channel: str, lang: str):
     """
-    Inicia captura e processamento em dois processos separados:
-      1) start_capture() grava WAVs em "audio_segments/{channel}/…"
-      2) worker_loop() processa WAVs, faz transcrição, tradução, TTS e gera HLS em "hls/{channel}/{lang}/…"
+    Inicia a captura de áudio da Twitch e o processamento em segundo plano:
+      - start_capture grava segmentos .wav em audio_segments/{channel}.
+      - worker_loop consome esses .wav, transcreve, traduz, sintetiza e gera HLS em hls/{channel}/{lang}.
     """
-    # Validações básicas
-    if not channel:
-        raise HTTPException(status_code=400, detail="Canal não informado.")
-    if lang not in ("en", "pt", "es"):
-        raise HTTPException(status_code=400, detail="Idioma não suportado. Use 'en', 'pt' ou 'es'.")
 
-    # 1) Cria a pasta onde a captura (start_capture) vai gravar segmentos .wav
+    logger.info(f"Iniciando pipeline para canal='{channel}', lang='{lang}'.")
+    # 1) Cria a pasta onde os segmentos de áudio brutos serão gravados
     audio_dir = os.path.join("audio_segments", channel)
     os.makedirs(audio_dir, exist_ok=True)
 
-    # 2) Cria uma subpasta para arquivos “processados” (concat.mp3, dub wav/mp3, etc)
-    processed_dir = os.path.join(audio_dir, "processed")
-    os.makedirs(processed_dir, exist_ok=True)
-
-    # 3) Cria a pasta de saída HLS (m3u8 + .ts)
+    # 2) Cria a pasta onde o HLS será gerado (hls/{channel}/{lang}/index.m3u8 + .ts)
     hls_dir = os.path.join("hls", channel, lang)
     os.makedirs(hls_dir, exist_ok=True)
 
-    logger.info(f"Iniciando pipeline para canal='{channel}', lang='{lang}'.")
+    # 3) Dispara o processo de captura (streamlink → ffmpeg → .wav) via multiprocessing
+    p_capture = Process(target=start_capture, args=(channel, audio_dir), daemon=True)
+    p_capture.start()
+    logger.info(f"[backend] Processo de captura iniciado com PID {p_capture.pid}.")
 
-    # --- a) Inicia captura de áudio (streamlink→ffmpeg). 
-    # Isso já dispara um subprocesso que fica rodando até ser parado externamente.
-    capture_proc = multiprocessing.Process(
-        target=start_capture,
-        args=(channel, audio_dir),
-        daemon=True
-    )
-    capture_proc.start()
-    logger.info(f"[backend] Processo de captura iniciado com PID {capture_proc.pid}.")
-
-    # --- b) Inicia o worker_loop num processo separado (runs forever).
-    worker_proc = multiprocessing.Process(
-        target=worker_loop,
-        args=(audio_dir, processed_dir, lang, hls_dir),
-        daemon=True
-    )
-    worker_proc.start()
-    logger.info(f"[backend] Processo de worker iniciado com PID {worker_proc.pid}.")
+    # 4) Dispara o processo do worker (Whisper → DeepL/Coqui → HLS) via multiprocessing
+    #    Atenção: worker_loop recebe exatamente 2 parâmetros: audio_dir e lang
+    p_worker = Process(target=worker_loop, args=(audio_dir, lang), daemon=True)
+    p_worker.start()
+    logger.info(f"[backend] Processo de worker iniciado com PID {p_worker.pid}.")
 
     return {"status": "iniciado", "channel": channel, "lang": lang}
 
 
 @app.post("/stop/{channel}")
-async def stop_stream(channel: str):
+async def stop_pipeline(channel: str):
     """
-    Aqui você pode implementar lógica para matar processos de captura e worker do canal.
-    No momento, apenas devolve status JSON.
+    Endpoint placeholder para parar captura e processamento de um canal.
+    (Implementar sinalização para encerrar correctamente os subprocessos, se necessário.)
     """
+    # Por enquanto, apenas retorna que foi "parado"
+    logger.info(f"Parando pipeline para canal='{channel}'.")
     return {"status": "parado", "channel": channel}
-
-
-# —————————————————————————————————————————————————————————————————————————————
-# SERVE O FRONTEND (build do Vite) SEM INTERFERIR NAS ROTAS /start E /health
-# —————————————————————————————————————————————————————————————————————————————
-
-# 1) Rota raiz ("/") devolve explicitamente o index.html gerado por Vite:
-@app.get("/")
-async def serve_index():
-    index_path = os.path.join("frontend", "dist", "index.html")
-    if not os.path.isfile(index_path):
-        logger.error(f"index.html não encontrado em {index_path}")
-        raise HTTPException(status_code=404, detail="Arquivo index.html não encontrado")
-    return FileResponse(index_path)
-
-
-# 2) Monta apenas a pasta "frontend/dist/assets" em "/assets"
-assets_dir = os.path.join("frontend", "dist", "assets")
-if os.path.isdir(assets_dir):
-    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
-    logger.info(f"Montando assets estáticos em /assets a partir de {assets_dir}")
-else:
-    logger.warning(f"Diretório de assets não existe: {assets_dir}")
-
-
-# —————————————————————————————————————————————————————————————————————————————
-# FIM DE backend/main.py
-# —————————————————————————————————————————————————————————————————————————————
