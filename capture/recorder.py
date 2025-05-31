@@ -27,10 +27,11 @@ def start_capture(channel_name: str, output_dir: str):
     log_path = os.path.join(output_dir, "ffmpeg_capture.log")
     print(f"[recorder] Salvando logs do ffmpeg em: {log_path}")
 
-    # Executa o ffmpeg via subprocess, redirecionando stdout e stderr para o arquivo de log
+    # Executa o comando via subprocess com shell=True para permitir o uso de pipe
     with open(log_path, "a") as log_file:
         process = subprocess.Popen(
-            shlex.split(cmd_str),
+            cmd_str,
+            shell=True,
             stdout=log_file,
             stderr=log_file
         )
