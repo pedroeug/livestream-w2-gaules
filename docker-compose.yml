@@ -1,0 +1,15 @@
+version: '3'
+services:
+  livestream-w2:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - DEEPL_API_KEY=${DEEPL_API_KEY}
+    volumes:
+      - ./hls:/app/hls
+      - ./audio_segments:/app/audio_segments
+    restart: always
