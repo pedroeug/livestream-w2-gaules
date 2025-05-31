@@ -5,10 +5,7 @@ import time
 import whisper
 from deep_translator import DeeplTranslator
 import subprocess
-
-# Importa Coqui TTS
 from TTS.api import TTS
-
 
 def worker_loop(audio_dir: str, lang: str):
     """
@@ -16,45 +13,40 @@ def worker_loop(audio_dir: str, lang: str):
       1. Monitora novos arquivos .wav em audio_dir.
       2. Transcreve usando Whisper.
       3. Traduz a transcrição (DeepL).
-      4. Sintetiza texto em áudio com Coqui TTS (voice-cloning em inglês).
-      5. Converte em HLS (.ts + index.m3u8) em hls/{channel}/{lang}/.
+      4. Sintetiza em voz usando Coqui TTS:
+         - Se lang == "en", aplica voice‐cloning via speaker_wav.
+         - Para outros idiomas, usa modelo multilingual sem clonagem.
+      5. Empacota o áudio resultante em HLS (.ts + index.m3u8) em hls/{channel}/{lang}/.
     """
 
-    # 1) Carrega o modelo Whisper
+    # 1) Carrega o modelo Whisper (vai demorar um pouco na primeira vez)
     model = whisper.load_model("base")
 
-    # 2) Mapeia cada lang para um modelo Coqui diferente.
-    #    Se for inglês, usamos o modelo multi-speaker "tts_models/en/vctk/vits",
-    #    de modo a poder escolher um speaker_idx (voice-cloning).
-    #    Para PT, usamos um modelo single-speaker (sem clonagem).
-    TTS_MODEL_MAP = {
-        "en":      "tts_models/en/vctk/vits",
-        "en-US":   "tts_models/en/vctk/vits",
-        "pt":      "tts_models/pt/mai/tacotron2-DDC",
-        "pt-BR":   "tts_models/pt/mai/tacotron2-DDC",
-    }
-    chosen_model = TTS_MODEL_MAP.get(lang, "tts_models/en/vctk/vits")
-
-    print(f"[worker] Carregando Coqui TTS modelo '{chosen_model}' para linguagem '{lang}' ...")
-    # Desativa gpu se não estiver disponível
-    tts = TTS(model_name=chosen_model, progress_bar=False, gpu=False)
-    print("[worker] Coqui TTS carregado com sucesso.")
-
-    # Caso estejamos usando o modelo VCTK (multi-speaker), podemos escolher
-    # um speaker_idx fixo (0, 1, 2, ...) para fonacionar “voice-cloning”.
-    # Aqui, simplesmente pegamos o speaker_idx = 0 (o primeiro no dataset VCTK).
-    use_voice_cloning = chosen_model.startswith("tts_models/en/vctk/vits")
-    speaker_idx = 0 if use_voice_cloning else None
-
-    if use_voice_cloning:
-        print(f"[worker] Modelo multi-speaker detectado. Usaremos speaker_idx = {speaker_idx} para clonagem de voz.")
-        # (Opcional) listar todos os speakers disponíveis, se quiser inspecionar:
-        # print(f"[worker] Lista de speakers disponíveis: {tts.speakers}")  
+    # 2) Configura Coqui TTS:
+    #    - Para inglês com clonagem de voz, usamos "tts_models/multilingual/multi-dataset/your_tts"
+    #      e passamos speaker_wav="assets/voices/gaules_sample.wav".
+    #    - Para outros idiomas, usamos o mesmo modelo sem speaker_wav (single‐speaker padrão).
+    #
+    # OBSERVAÇÃO: substitua "tts_models/multilingual/multi-dataset/your_tts" pelo nome exato
+    # do modelo que você treinou/baixou para voice‐cloning, se for diferente.
+    tts_clone = TTS(
+        model_name="tts_models/multilingual/multi-dataset/your_tts",
+        progress_bar=False,
+        gpu=False
+    )
+    tts_default = TTS(
+        model_name="tts_models/multilingual/multi-dataset/your_tts",
+        progress_bar=False,
+        gpu=False
+    )
+    speaker_wav = "assets/voices/gaules_sample.wav"
+    if not os.path.isfile(speaker_wav):
+        print(f"[worker] AVISO: speaker_wav não encontrado em {speaker_wav}. Voice‐cloning pode falhar.")
 
     processed = set()
 
     while True:
-        # 3) Procura por novos segmentos .wav na pasta audio_dir
+        # Lista todos os arquivos .wav ainda não processados
         for filename in sorted(os.listdir(audio_dir)):
             if not filename.endswith(".wav") or filename in processed:
                 continue
@@ -63,43 +55,55 @@ def worker_loop(audio_dir: str, lang: str):
             print(f"[worker] Encontrou novo segmento: {wav_path}")
 
             try:
-                # 3.1) Transcrição com Whisper
+                # 3) Transcrição com Whisper
                 print(f"[worker] Transcrevendo {wav_path} ...")
                 result = model.transcribe(wav_path)
                 text = result["text"].strip()
                 print(f"[worker] Transcrição: {text}")
 
-                # 3.2) Tradução com DeepL (se lang != "en")
-                if lang != "en":
-                    print(f"[worker] Traduzindo para '{lang}' ...")
-                    translator = DeeplTranslator(source="auto", target=lang)
-                    translated = translator.translate(text)
-                    print(f"[worker] Tradução: {translated}")
-                else:
-                    translated = text
-                    print("[worker] Idioma 'en' selecionado; pulando tradução.")
+                # 4) Tradução com DeepL
+                print(f"[worker] Traduzindo para '{lang}' ...")
+                translator = DeeplTranslator(source="auto", target=lang)
+                translated = translator.translate(text)
+                print(f"[worker] Tradução: {translated}")
 
-                # 3.3) Síntese de voz com Coqui TTS
-                print(f"[worker] Sintetizando texto com Coqui TTS ...")
-                output_wav = wav_path.replace(".wav", f"_{lang}.wav")
+                # 5) Síntese de voz com Coqui TTS
+                #    Geramos primeiro um WAV de saída, depois convertemos para MP3.
+                base_name = filename.replace(".wav", f"_{lang}")
+                tts_output_wav = os.path.join(audio_dir, base_name + ".wav")
+                tts_output_mp3 = os.path.join(audio_dir, base_name + ".mp3")
 
-                if use_voice_cloning:
-                    # Se o modelo suporta multi-speaker (VCTK), passa speaker_idx
-                    tts.tts_to_file(
+                if lang.lower() == "en":
+                    print(f"[worker] Sintetizando '{translated}' com Coqui TTS (voice‐cloning) ...")
+                    # Gera WAV clonando a voz usando o sample speaker_wav
+                    tts_clone.tts_to_file(
                         text=translated,
-                        file_path=output_wav,
-                        speaker_idx=speaker_idx
+                        speaker_wav=speaker_wav,
+                        file_path=tts_output_wav
                     )
-                    print(f"[worker] (voice-cloning) Áudio sintetizado salvo em {output_wav} usando speaker_idx={speaker_idx}")
                 else:
-                    # Modelos single-speaker (ex: português) não precisam de speaker_idx
-                    tts.tts_to_file(
+                    print(f"[worker] Sintetizando '{translated}' com Coqui TTS (multilingual sem clonagem) ...")
+                    # Gera WAV sem clonagem (modelo multilingual)
+                    tts_default.tts_to_file(
                         text=translated,
-                        file_path=output_wav
+                        file_path=tts_output_wav
                     )
-                    print(f"[worker] Áudio sintetizado salvo em {output_wav}")
 
-                # 3.4) Empacotar em HLS via ffmpeg
+                print(f"[worker] WAV sintetizado salvo em {tts_output_wav}")
+
+                # 6) Converte o WAV sintetizado para MP3 via FFmpeg
+                print(f"[worker] Convertendo {tts_output_wav} para MP3 ...")
+                ffmpeg_mp3_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", tts_output_wav,
+                    "-codec:a", "libmp3lame",
+                    "-qscale:a", "2",
+                    tts_output_mp3
+                ]
+                subprocess.run(ffmpeg_mp3_cmd, check=True)
+                print(f"[worker] MP3 gerado em {tts_output_mp3}")
+
+                # 7) Empacota em HLS via FFmpeg (.ts segments + index.m3u8)
                 channel = os.path.basename(audio_dir)
                 hls_dir = os.path.join("hls", channel, lang)
                 os.makedirs(hls_dir, exist_ok=True)
@@ -107,10 +111,10 @@ def worker_loop(audio_dir: str, lang: str):
                 ts_pattern = os.path.join(hls_dir, "%03d.ts")
                 output_index = os.path.join(hls_dir, "index.m3u8")
 
-                print(f"[worker] Convertendo {output_wav} para HLS em {output_index} ...")
-                ffmpeg_cmd = [
+                print(f"[worker] Convertendo {tts_output_mp3} para HLS em {output_index} ...")
+                ffmpeg_hls_cmd = [
                     "ffmpeg", "-y",
-                    "-i", output_wav,
+                    "-i", tts_output_mp3,
                     "-c:a", "aac", "-b:a", "128k",
                     "-vn",
                     "-hls_time", "10",
@@ -118,14 +122,13 @@ def worker_loop(audio_dir: str, lang: str):
                     "-hls_segment_filename", ts_pattern,
                     output_index
                 ]
-                subprocess.run(ffmpeg_cmd, check=True)
+                subprocess.run(ffmpeg_hls_cmd, check=True)
                 print(f"[worker] HLS gerado em {output_index}")
 
-                # Marca este segmento original como processado para não repetir
                 processed.add(filename)
 
             except Exception as e:
                 print(f"[worker] Erro ao processar {wav_path}: {e}")
                 processed.add(filename)
 
-        time.sleep(1)  # Espera 1 segundo antes de varrer novamente
+        time.sleep(1)  # Espera 1 segundo antes de checar novamente
