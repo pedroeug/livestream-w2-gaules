@@ -1,15 +1,9 @@
-# livestream-w2-gaules/pipeline/worker.py
-
 import os
 import time
-import re
-import whisper
-from deep_translator import DeeplTranslator
-import subprocess
-import glob
-import shutil
-import traceback
 import logging
+import subprocess
+import whisper
+import deepl
 from TTS.api import TTS
 
 # Configuração de logging
@@ -23,357 +17,288 @@ logging.basicConfig(
 )
 logger = logging.getLogger("worker")
 
-# Configuração da chave DeepL
-DEEPL_API_KEY = "6403a834-79ed-4d72-ac3e-079417477805:fx"
-os.environ["DEEPL_API_KEY"] = DEEPL_API_KEY
+# Carrega o modelo Whisper
+def load_whisper_model():
+    logger.info("Carregando modelo Whisper...")
+    model = whisper.load_model("base")
+    logger.info("Modelo Whisper carregado com sucesso")
+    return model
 
-def worker_loop(audio_dir: str, lang: str):
-    """
-    Loop contínuo que:
-      1. Monitora novos arquivos .wav em audio_dir.
-      2. Transcreve usando Whisper.
-      3. Traduz a transcrição (DeepL).
-      4. Síntese de voz (Coqui TTS).
-      5. Empacota em HLS (.ts + index.m3u8) em hls/{channel}/{lang}/.
-    """
+# Carrega o modelo TTS
+def load_tts_model():
+    logger.info("Carregando modelo Coqui TTS...")
+    
+    # Verifica se existe um arquivo de voz para clonagem
+    voice_sample = "assets/voices/gaules_sample.wav"
+    if os.path.exists(voice_sample):
+        logger.info(f"Arquivo de voz para clonagem encontrado: {voice_sample}")
+    
+    # Carrega o modelo XTTS para clonagem de voz
+    model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
+    
+    logger.info("Modelo Coqui TTS carregado com sucesso")
+    return model
+
+# Transcreve o áudio usando Whisper
+def transcribe_audio(model, audio_file):
+    logger.info(f"Transcrevendo {audio_file} com idioma forçado para português...")
+    result = model.transcribe(audio_file, language="pt")
+    text = result["text"].strip()
+    logger.info(f"Transcrição: {text}")
+    return text
+
+# Traduz o texto usando DeepL
+def translate_text(text, target_lang):
+    logger.info(f"Traduzindo para {target_lang} ...")
+    
     try:
-        logger.info(f"Iniciando worker_loop para {audio_dir} e idioma {lang}")
+        # Usa a API DeepL para tradução
+        api_key = os.environ.get("DEEPL_API_KEY", "6403a834-79ed-4d72-ac3e-079417477805:fx")
+        translator = deepl.Translator(api_key)
+        result = translator.translate_text(text, target_lang=target_lang.upper())
+        translated_text = str(result)
+        logger.info(f"Tradução: {translated_text}")
+        return translated_text
+    except Exception as e:
+        logger.error(f"Erro na tradução: {e}")
+        # Fallback para caso de erro na tradução
+        return text
+
+# Sintetiza o texto usando Coqui TTS
+def synthesize_speech(model, text, output_file, lang):
+    logger.info(f"Sintetizando texto traduzido com Coqui TTS ...")
+    
+    try:
+        # Usa clonagem de voz se disponível
+        voice_sample = "assets/voices/gaules_sample.wav"
         
-        # Usar caminhos absolutos para evitar problemas de contexto
-        audio_dir_abs = os.path.abspath(audio_dir)
-        logger.info(f"Caminho absoluto para diretório de áudio: {audio_dir_abs}")
-        
-        if not os.path.exists(audio_dir_abs):
-            logger.error(f"ERRO: Diretório {audio_dir_abs} não existe!")
-            os.makedirs(audio_dir_abs, exist_ok=True)
-            logger.info(f"Diretório {audio_dir_abs} criado")
-
-        # Verificar permissões do diretório
-        logger.info(f"Verificando permissões do diretório {audio_dir_abs}")
-        try:
-            test_file = os.path.join(audio_dir_abs, "test_permission.tmp")
-            with open(test_file, "w") as f:
-                f.write("test")
-            os.remove(test_file)
-            logger.info(f"Permissões de escrita OK para {audio_dir_abs}")
-        except Exception as e:
-            logger.error(f"ERRO de permissão no diretório {audio_dir_abs}: {e}")
-
-        # Carrega o modelo Whisper
-        logger.info("Carregando modelo Whisper...")
-        model = whisper.load_model("base")
-        logger.info("Modelo Whisper carregado com sucesso")
-
-        # Carrega o modelo Coqui TTS
-        logger.info("Carregando modelo Coqui TTS...")
-        try:
-            # Configura Coqui TTS:
-            # Para inglês com clonagem de voz, usamos "tts_models/multilingual/multi-dataset/your_tts"
-            # e passamos speaker_wav="assets/voices/gaules_sample.wav".
-            tts_clone = TTS(
-                model_name="tts_models/multilingual/multi-dataset/your_tts",
-                progress_bar=False,
-                gpu=False
-            )
-            speaker_wav = "assets/voices/gaules_sample.wav"
-            if not os.path.isfile(speaker_wav):
-                logger.warning(f"AVISO: speaker_wav não encontrado em {speaker_wav}. Voice‐cloning pode falhar.")
-            else:
-                logger.info(f"Arquivo de voz para clonagem encontrado: {speaker_wav}")
+        if os.path.exists(voice_sample):
+            logger.info(f"Usando voice cloning para {lang}")
             
-            logger.info("Modelo Coqui TTS carregado com sucesso")
-        except Exception as e:
-            logger.error(f"ERRO ao carregar modelo Coqui TTS: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return
-
-        processed = set()
-        
-        # Padrão para identificar apenas segmentos originais (segment_XXX.wav)
-        original_segment_pattern = re.compile(r'^segment_\d+\.wav$')
-        
-        # Configuração para o streaming contínuo
-        channel = os.path.basename(audio_dir_abs)
-        hls_dir = os.path.abspath(os.path.join("hls", channel, lang))
-        logger.info(f"Diretório HLS: {hls_dir}")
-        
-        os.makedirs(hls_dir, exist_ok=True)
-        
-        # Diretório para armazenar os arquivos de áudio processados
-        processed_dir = os.path.join(audio_dir_abs, "processed")
-        os.makedirs(processed_dir, exist_ok=True)
-        
-        # Arquivo para concatenar todos os segmentos de áudio processados
-        concat_file = os.path.join(processed_dir, "concat.mp3")
-        
-        # Inicializar o HLS
-        initialize_hls(hls_dir)
-        
-        # Contador para segmentos HLS
-        segment_counter = 0
-        
-        # Contador de falhas consecutivas
-        consecutive_failures = 0
-        
-        logger.info(f"Iniciando loop de monitoramento em {audio_dir_abs}")
-        
-        while True:
-            try:
-                # Lista todos os arquivos .wav ainda não processados
-                all_files = os.listdir(audio_dir_abs)
-                wav_files = [f for f in all_files if f.endswith(".wav")]
-                
-                # Filtra apenas os segmentos originais usando regex
-                original_segments = [f for f in wav_files if original_segment_pattern.match(f)]
-                
-                # Filtra os segmentos que ainda não foram processados
-                unprocessed_segments = [f for f in original_segments if f not in processed]
-                
-                if unprocessed_segments:
-                    logger.info(f"Encontrados {len(unprocessed_segments)} segmentos não processados")
-                    
-                    # Processa os segmentos em ordem
-                    for filename in sorted(unprocessed_segments):
-                        wav_path = os.path.join(audio_dir_abs, filename)
-                        logger.info(f"Processando segmento: {filename}")
-                        
-                        try:
-                            # Verificar tamanho do arquivo para evitar arquivos corrompidos
-                            file_size = os.path.getsize(wav_path)
-                            if file_size < 1000:  # Menos de 1KB provavelmente é um arquivo corrompido
-                                logger.warning(f"Arquivo muito pequeno ({file_size} bytes), provavelmente corrompido. Pulando.")
-                                processed.add(filename)
-                                continue
-                            
-                            # 1) Transcrição com Whisper - forçando idioma português
-                            logger.info(f"Transcrevendo {wav_path} com idioma forçado para português...")
-                            
-                            # Usar configurações mais robustas para evitar texto repetitivo
-                            result = model.transcribe(
-                                wav_path, 
-                                language="pt", 
-                                fp16=False,
-                                temperature=0.0,  # Reduzir aleatoriedade
-                                compression_ratio_threshold=2.0,  # Mais tolerante a repetições
-                                no_speech_threshold=0.6  # Mais sensível a silêncio
-                            )
-                            
-                            text = result["text"].strip()
-                            
-                            # Limitar texto repetitivo
-                            if len(text) > 100 and (text.count(" o que é") > 5 or text.count(" que é o") > 5):
-                                text = "Sem fala clara detectada neste segmento."
-                                logger.warning(f"Texto repetitivo detectado, usando texto padrão")
-                            
-                            logger.info(f"Transcrição: {text}")
-                            
-                            # Se a transcrição estiver vazia, adicione um texto padrão
-                            if not text:
-                                text = "Sem fala detectada neste segmento."
-                                logger.info(f"Transcrição vazia, usando texto padrão: {text}")
-                            
-                            # 2) Tradução com DeepL
-                            translated = text
-                            if text and text != "Sem fala detectada neste segmento.":
-                                logger.info(f"Traduzindo para {lang} ...")
-                                try:
-                                    # Usar a chave DeepL fornecida
-                                    translator = DeeplTranslator(source="pt", target=lang, api_key=DEEPL_API_KEY)
-                                    translated = translator.translate(text)
-                                    logger.info(f"Tradução: {translated}")
-                                except Exception as e:
-                                    logger.error(f"Erro na tradução DeepL: {e}")
-                                    logger.info("Usando texto original como fallback")
-                                    translated = text
-                            else:
-                                logger.info("Pulando tradução: texto vazio.")
-                            
-                            # 3) Síntese de voz com Coqui TTS
-                            output_wav = os.path.join(processed_dir, f"dubbed_{segment_counter}.wav")
-                            
-                            try:
-                                if translated and translated != "Sem fala detectada neste segmento.":
-                                    logger.info(f"Sintetizando texto traduzido com Coqui TTS ...")
-                                    
-                                    if lang.lower() == "en":
-                                        # Gera WAV clonando a voz usando o sample speaker_wav
-                                        # Adicionando o parâmetro language explicitamente
-                                        logger.info("Usando voice cloning para inglês")
-                                        tts_clone.tts_to_file(
-                                            text=translated,
-                                            speaker_wav=speaker_wav,
-                                            language=lang.lower(),  # Adicionado parâmetro language
-                                            file_path=output_wav
-                                        )
-                                    else:
-                                        # Gera WAV sem clonagem (modelo multilingual)
-                                        # Adicionando o parâmetro language explicitamente
-                                        logger.info(f"Usando modelo multilingual para {lang}")
-                                        tts_clone.tts_to_file(
-                                            text=translated,
-                                            language=lang.lower(),  # Adicionado parâmetro language
-                                            file_path=output_wav
-                                        )
-                                    
-                                    logger.info(f"Áudio sintetizado salvo em {output_wav}")
-                                else:
-                                    # Fallback para síntese de voz local
-                                    create_fallback_audio(output_wav, translated)
-                            except Exception as e:
-                                logger.error(f"Erro na síntese de voz: {e}")
-                                logger.error(f"Traceback: {traceback.format_exc()}")
-                                # Criar um arquivo de áudio vazio para manter o fluxo
-                                create_fallback_audio(output_wav, translated)
-                            
-                            # 4) Converter o segmento para MP3
-                            output_mp3 = os.path.join(processed_dir, f"dubbed_{segment_counter}.mp3")
-                            logger.info(f"Convertendo WAV para MP3: {output_wav} -> {output_mp3}")
-                            
-                            try:
-                                ffmpeg_cmd = [
-                                    "ffmpeg", "-y",
-                                    "-i", output_wav,
-                                    "-c:a", "libmp3lame", 
-                                    "-b:a", "128k",
-                                    output_mp3
-                                ]
-                                result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-                                logger.info(f"Arquivo convertido para MP3: {output_mp3}")
-                                
-                                # 5) Adicionar ao arquivo de áudio contínuo
-                                logger.info(f"Adicionando segmento ao arquivo contínuo: {concat_file}")
-                                
-                                if not os.path.exists(concat_file):
-                                    # Se o arquivo não existir, apenas copie o primeiro segmento
-                                    shutil.copy(output_mp3, concat_file)
-                                    logger.info(f"Arquivo contínuo iniciado com {output_mp3}")
-                                else:
-                                    # Se já existir, concatene usando ffmpeg
-                                    temp_file = concat_file + ".temp"
-                                    concat_cmd = [
-                                        "ffmpeg", "-y",
-                                        "-i", "concat:" + concat_file + "|" + output_mp3,
-                                        "-acodec", "copy",
-                                        temp_file
-                                    ]
-                                    subprocess.run(concat_cmd, check=True, capture_output=True)
-                                    
-                                    # Substitui o arquivo original pelo temporário
-                                    shutil.move(temp_file, concat_file)
-                                    logger.info(f"Segmento {output_mp3} adicionado ao arquivo contínuo")
-                                
-                                # 6) Atualizar o HLS com o novo conteúdo
-                                logger.info(f"Atualizando HLS com o arquivo contínuo: {concat_file}")
-                                
-                                # Padrão para os segmentos HLS
-                                ts_pattern = os.path.join(hls_dir, "%03d.ts")
-                                output_index = os.path.join(hls_dir, "index.m3u8")
-                                
-                                # Converte o arquivo MP3 para HLS
-                                hls_cmd = [
-                                    "ffmpeg", "-y",
-                                    "-i", concat_file,
-                                    "-c:a", "aac", 
-                                    "-b:a", "128k",
-                                    "-vn",
-                                    "-hls_time", "10",
-                                    "-hls_playlist_type", "event",
-                                    "-hls_segment_filename", ts_pattern,
-                                    output_index
-                                ]
-                                subprocess.run(hls_cmd, check=True, capture_output=True)
-                                logger.info(f"HLS atualizado em {output_index}")
-                                
-                            except subprocess.CalledProcessError as e:
-                                logger.error(f"Erro ao executar ffmpeg: {e}")
-                                logger.error(f"Saída de erro: {e.stderr.decode() if e.stderr else 'Nenhuma'}")
-                            except Exception as e:
-                                logger.error(f"Erro ao processar áudio: {e}")
-                                logger.error(f"Traceback: {traceback.format_exc()}")
-                            
-                            # Marcar como processado e incrementar contador
-                            processed.add(filename)
-                            segment_counter += 1
-                            consecutive_failures = 0
-                            
-                        except Exception as e:
-                            logger.error(f"Erro ao processar segmento {filename}: {e}")
-                            logger.error(f"Traceback: {traceback.format_exc()}")
-                            consecutive_failures += 1
-                            
-                            # Se houver muitas falhas consecutivas, pular este segmento
-                            if consecutive_failures > 3:
-                                logger.warning(f"Muitas falhas consecutivas, pulando segmento {filename}")
-                                processed.add(filename)
-                                consecutive_failures = 0
-                
-                # Aguardar um pouco antes de verificar novamente
-                time.sleep(1)
-                
-            except Exception as e:
-                logger.error(f"Erro no loop principal: {e}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                time.sleep(5)  # Aguardar um pouco mais em caso de erro
-    
+            # Mapeia o código de idioma para o formato esperado pelo XTTS
+            lang_map = {
+                "en": "en",
+                "pt": "pt",
+                "es": "es"
+            }
+            
+            tts_lang = lang_map.get(lang, "en")
+            
+            # Sintetiza o áudio com clonagem de voz
+            model.tts_to_file(
+                text=text,
+                file_path=output_file,
+                speaker_wav=voice_sample,
+                language=tts_lang
+            )
+        else:
+            logger.info("Voice cloning não disponível, usando voz padrão")
+            model.tts_to_file(text=text, file_path=output_file)
+            
+        logger.info(f"Áudio sintetizado salvo em {output_file}")
+        return True
     except Exception as e:
-        logger.error(f"ERRO CRÍTICO no worker_loop: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Erro na síntese de voz: {e}")
+        return False
 
-
-def initialize_hls(hls_dir):
-    """Inicializa o diretório HLS com um arquivo index.m3u8 vazio"""
-    index_path = os.path.join(hls_dir, "index.m3u8")
-    with open(index_path, "w") as f:
-        f.write("#EXTM3U\n")
-        f.write("#EXT-X-VERSION:3\n")
-        f.write("#EXT-X-TARGETDURATION:10\n")
-        f.write("#EXT-X-MEDIA-SEQUENCE:0\n")
-        f.write("#EXT-X-PLAYLIST-TYPE:EVENT\n")
-    logger.info(f"Arquivo HLS inicial criado em {index_path}")
-
-
-def create_fallback_audio(output_path, text):
-    """Cria um arquivo de áudio de fallback usando ffmpeg"""
-    logger.info(f"Criando áudio de fallback para: {text}")
-    
-    # Criar arquivo de texto temporário
-    temp_dir = os.path.dirname(output_path)
-    temp_txt = os.path.join(temp_dir, "temp_text.txt")
-    with open(temp_txt, "w") as f:
-        f.write(text if text else "No speech detected")
-    
-    # Gerar áudio com ffmpeg
+# Converte WAV para MP3
+def convert_to_mp3(wav_file, mp3_file):
+    logger.info(f"Convertendo WAV para MP3: {wav_file} -> {mp3_file}")
     try:
-        # Usar uma duração proporcional ao tamanho do texto
-        duration = max(3, min(10, len(text) / 20))
-        
-        ffmpeg_cmd = [
+        cmd = [
             "ffmpeg", "-y",
-            "-f", "lavfi", 
-            "-i", f"sine=frequency=440:duration={duration}",
-            "-c:a", "pcm_s16le",
-            "-ar", "48000",
-            "-ac", "2",
-            output_path
+            "-i", wav_file,
+            "-c:a", "libmp3lame",
+            "-b:a", "128k",
+            mp3_file
         ]
-        subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-        logger.info(f"Áudio de fallback gerado em {output_path}")
-    except Exception as e:
-        logger.error(f"Erro ao criar áudio de fallback: {e}")
-        # Criar um arquivo de áudio vazio como último recurso
-        try:
-            ffmpeg_empty_cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi", 
-                "-i", "anullsrc=r=48000:cl=stereo:d=3",
-                "-c:a", "pcm_s16le",
-                output_path
-            ]
-            subprocess.run(ffmpeg_empty_cmd, check=True, capture_output=True)
-            logger.info(f"Áudio vazio gerado em {output_path}")
-        except Exception as e2:
-            logger.error(f"Erro ao criar áudio vazio: {e2}")
+        subprocess.run(cmd, check=True, capture_output=True)
+        logger.info(f"Arquivo convertido para MP3: {mp3_file}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Erro ao converter para MP3: {e}")
+        logger.error(f"Saída de erro: {e.stderr.decode()}")
+        return False
+
+# Concatena arquivos MP3 usando método de lista de arquivos
+def concatenate_mp3(concat_file, new_file):
+    logger.info(f"Adicionando segmento ao arquivo contínuo: {concat_file}")
     
-    # Limpar arquivo temporário
-    if os.path.exists(temp_txt):
-        os.remove(temp_txt)
+    try:
+        # Método alternativo usando lista de arquivos
+        temp_list = "temp_file_list.txt"
+        
+        # Se o arquivo de concatenação não existe, apenas copie o novo arquivo
+        if not os.path.exists(concat_file):
+            cmd = ["cp", new_file, concat_file]
+            subprocess.run(cmd, check=True, capture_output=True)
+            logger.info(f"Primeiro segmento copiado para {concat_file}")
+            return True
+        
+        # Cria um arquivo de lista para ffmpeg
+        with open(temp_list, "w") as f:
+            f.write(f"file '{concat_file}'\n")
+            f.write(f"file '{new_file}'\n")
+        
+        # Usa o método de concatenação com arquivo de lista
+        output_file = concat_file + ".new"
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", temp_list,
+            "-c", "copy",
+            output_file
+        ]
+        
+        subprocess.run(cmd, check=True, capture_output=True)
+        
+        # Substitui o arquivo original pelo novo
+        os.replace(output_file, concat_file)
+        
+        # Remove o arquivo de lista temporário
+        if os.path.exists(temp_list):
+            os.remove(temp_list)
+            
+        logger.info(f"Segmento adicionado com sucesso ao arquivo contínuo")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Erro ao executar ffmpeg: {e}")
+        logger.error(f"Saída de erro: {e.stderr.decode()}")
+        return False
+    except Exception as e:
+        logger.error(f"Erro ao concatenar arquivos: {e}")
+        return False
+
+# Gera o streaming HLS
+def generate_hls(input_file, output_dir):
+    logger.info(f"Gerando streaming HLS para {input_file}")
+    
+    try:
+        # Garante que o diretório de saída existe
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Gera o manifesto HLS e os segmentos
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", input_file,
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-vn",
+            "-hls_time", "10",
+            "-hls_playlist_type", "event",
+            "-hls_segment_filename", f"{output_dir}/%03d.ts",
+            f"{output_dir}/index.m3u8"
+        ]
+        
+        subprocess.run(cmd, check=True, capture_output=True)
+        logger.info(f"Streaming HLS gerado em {output_dir}/index.m3u8")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Erro ao gerar HLS: {e}")
+        logger.error(f"Saída de erro: {e.stderr.decode()}")
+        return False
+
+# Loop principal do worker
+def worker_loop(audio_dir, target_lang):
+    # Verifica permissões do diretório
+    logger.info(f"Verificando permissões do diretório {audio_dir}")
+    if os.access(audio_dir, os.W_OK):
+        logger.info(f"Permissões de escrita OK para {audio_dir}")
+    else:
+        logger.error(f"Sem permissão de escrita para {audio_dir}")
+        return
+    
+    # Carrega os modelos
+    whisper_model = load_whisper_model()
+    tts_model = load_tts_model()
+    
+    # Cria diretórios necessários
+    processed_dir = os.path.join(audio_dir, "processed")
+    os.makedirs(processed_dir, exist_ok=True)
+    
+    # Diretório para streaming HLS
+    hls_dir = os.path.join("hls", os.path.basename(audio_dir), target_lang)
+    os.makedirs(hls_dir, exist_ok=True)
+    
+    # Cria um arquivo HLS inicial vazio
+    with open(os.path.join(hls_dir, "index.m3u8"), "w") as f:
+        f.write("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n")
+    
+    logger.info(f"Diretório HLS: {hls_dir}")
+    logger.info(f"Arquivo HLS inicial criado em {os.path.join(hls_dir, 'index.m3u8')}")
+    
+    # Arquivo de concatenação
+    concat_file = os.path.join(processed_dir, "concat.mp3")
+    
+    # Contador para nomes de arquivos
+    counter = 0
+    processed_files = set()
+    
+    logger.info(f"Iniciando loop de monitoramento em {audio_dir}")
+    
+    while True:
+        try:
+            # Lista todos os arquivos WAV no diretório
+            files = [f for f in os.listdir(audio_dir) if f.endswith(".wav") and not f.startswith(".")]
+            
+            # Ordena os arquivos por nome
+            files.sort()
+            
+            # Filtra arquivos não processados
+            new_files = [f for f in files if f not in processed_files]
+            
+            if new_files:
+                logger.info(f"Encontrados {len(new_files)} segmentos não processados")
+                
+                for file in new_files:
+                    try:
+                        # Caminho completo do arquivo
+                        file_path = os.path.join(audio_dir, file)
+                        
+                        logger.info(f"Processando segmento: {file}")
+                        
+                        # Transcreve o áudio
+                        text = transcribe_audio(whisper_model, file_path)
+                        
+                        # Traduz o texto
+                        translated_text = translate_text(text, target_lang)
+                        
+                        # Sintetiza a fala
+                        output_wav = os.path.join(processed_dir, f"dubbed_{counter}.wav")
+                        if synthesize_speech(tts_model, translated_text, output_wav, target_lang):
+                            
+                            # Converte para MP3
+                            output_mp3 = os.path.join(processed_dir, f"dubbed_{counter}.mp3")
+                            if convert_to_mp3(output_wav, output_mp3):
+                                
+                                # Concatena ao arquivo contínuo
+                                if concatenate_mp3(concat_file, output_mp3):
+                                    
+                                    # Gera streaming HLS
+                                    generate_hls(concat_file, hls_dir)
+                                    
+                                    # Marca como processado
+                                    processed_files.add(file)
+                                    counter += 1
+                    
+                    except Exception as e:
+                        logger.error(f"Erro ao processar {file}: {e}")
+            
+            # Aguarda antes da próxima verificação
+            time.sleep(1)
+            
+        except Exception as e:
+            logger.error(f"Erro no loop principal: {e}")
+            time.sleep(5)  # Aguarda mais tempo em caso de erro
+
+# Função para iniciar o worker como processo separado
+def start_worker(audio_dir, target_lang):
+    worker_loop(audio_dir, target_lang)
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) >= 3:
+        worker_loop(sys.argv[1], sys.argv[2])
+    else:
+        print("Uso: python worker.py <audio_dir> <target_lang>")
