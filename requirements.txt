@@ -14,3 +14,5 @@ TTS
 
 
 python-dotenv
+
+streamlink==6.5.1
