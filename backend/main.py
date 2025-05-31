@@ -6,6 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from multiprocessing import Process
 import logging
+from dotenv import load_dotenv # Importar dotenv
+
+# Carregar variáveis de ambiente do arquivo .env
+load_dotenv()
 
 # Ajuste de logging para exibir mensagens de INFO nos subprocessos
 logging.basicConfig(
@@ -15,8 +19,8 @@ logging.basicConfig(
 
 logger = logging.getLogger("backend")
 
-# Importa as funções de download de modelos, captura e worker
-from download_models import download_all_models
+# Importa as funções de captura e worker
+# from download_models import download_all_models # Comentado pois o arquivo não existe no repo
 from capture.recorder import start_capture
 from pipeline.worker import worker_loop
 
@@ -32,18 +36,13 @@ app.add_middleware(
 )
 
 # Baixa/verifica o modelo Whisper assim que o servidor sobe
-download_all_models()
+# download_all_models() # Comentado pois a função não está definida
 
-# Garante que a pasta 'hls' exista antes de montá-la como StaticFiles
+# Garante que as pastas necessárias existam
 os.makedirs("hls", exist_ok=True)
+os.makedirs("frontend/dist", exist_ok=True)
 
-# Monta o diretório 'hls' para servir arquivos HLS (.m3u8 e .ts)
-app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
-
-# Garante que o frontend compilado exista; monte 'frontend/dist' para servir o React
-os.makedirs("frontend/dist", exist_ok=True)  # só para garantir, caso ainda não tenha sido copiado
-app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
-
+# --- Definição das Rotas da API --- 
 
 @app.get("/health")
 async def health_check():
@@ -61,7 +60,7 @@ async def start_pipeline(channel: str, lang: str):
       - worker_loop consome esses .wav, transcreve, traduz, sintetiza e gera HLS em hls/{channel}/{lang}.
     """
 
-    logger.info(f"Iniciando pipeline para canal='{channel}', lang='{lang}'.")
+    logger.info(f"Iniciando pipeline para canal=\'{channel}\', lang=\'{lang}\'.")
     # 1) Cria a pasta onde os segmentos de áudio brutos serão gravados
     audio_dir = os.path.join("audio_segments", channel)
     os.makedirs(audio_dir, exist_ok=True)
@@ -91,5 +90,15 @@ async def stop_pipeline(channel: str):
     (Implementar sinalização para encerrar correctamente os subprocessos, se necessário.)
     """
     # Por enquanto, apenas retorna que foi "parado"
-    logger.info(f"Parando pipeline para canal='{channel}'.")
+    logger.info(f"Parando pipeline para canal=\'{channel}\'.")
     return {"status": "parado", "channel": channel}
+
+# --- Montagem dos Arquivos Estáticos (DEVE VIR DEPOIS DAS ROTAS DA API) ---
+
+# Monta o diretório 'hls' para servir arquivos HLS (.m3u8 e .ts)
+app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
+
+# Monta o diretório 'frontend/dist' para servir o React na raiz
+# Esta deve ser a ÚLTIMA montagem para não sobrescrever as rotas da API
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
+
