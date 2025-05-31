@@ -1,18 +1,18 @@
 # livestream-w2-gaules/Dockerfile
 
-# --- Estágio 1: Construção do Frontend com Vite ---
+# --- Estágio 1: Build do Frontend (Vite) ---
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia apenas package.json e limpa cache
+# Copia package.json e limpa cache
 COPY frontend/package.json ./
 RUN npm cache clean --force
 
-# Instala dependências do frontend sem gerar package-lock.json
+# Instala dependências sem gerar package-lock.json
 RUN npm install --legacy-peer-deps --no-package-lock
 
-# Copia todo o código do frontend e executa o build
+# Copia todo o código do frontend e executa build
 COPY frontend/ ./
 RUN npm run build
 
@@ -21,10 +21,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO: ffmpeg, git, curl, compiladores e streamlink
+# Instala dependências do SO: ffmpeg, streamlink, build-essential, etc.
 RUN apt-get update && \
-    apt-get install -y ffmpeg git curl build-essential streamlink && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+      ffmpeg \
+      git \
+      curl \
+      build-essential \
+      streamlink \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copia e instala dependências Python
 COPY requirements.txt ./
@@ -35,16 +41,22 @@ COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia o frontend compilado do estágio anterior
+# Copia o frontend compilado do estágio 1
 COPY --from=frontend /app/dist ./frontend/dist
 
-# Copia o script de inicialização e garante permissão
-COPY start.sh ./
-RUN chmod +x start.sh
+# Cria as pastas necessárias a frio para evitar erros de montagem
+RUN mkdir -p hls \
+    && mkdir -p audio_segments
 
 # Define variável de ambiente e expõe a porta
-ENV PORT=$PORT
-EXPOSE $PORT
+ENV PORT=8000
+EXPOSE 8000
 
-# Comando padrão ao iniciar o contêiner
-CMD ["bash", "start.sh"]
+# Copia um script de inicialização (por exemplo, start.sh) se você tiver um
+# Se não tiver, podemos inicializar o uvicorn diretamente
+# COPY start.sh ./
+# RUN chmod +x start.sh
+
+# Comando padrão para iniciar o uvicorn
+# Ajuste "backend.main:app" conforme o path do seu main.py
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
