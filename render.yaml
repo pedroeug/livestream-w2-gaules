@@ -1,63 +1,20 @@
-# render.yaml
-
-# Definições de serviços para Render.com
-# O Render usará este arquivo para configurar e implantar o serviço Docker.
-
 services:
-  - type: web_service           # Serviço web baseado em Docker
-    name: livestream-w2-gaules  # Nome do serviço em Render
-    env: docker                 # Indica que usaremos o Dockerfile
-    plan: starter               # Plano gratuito (Starter). Ajuste conforme sua necessidade.
-    region: oregon              # Região do cluster (opções: oregon, virginia, frankfurt, singapore, etc.)
+  - type: web_service
+    name: livestream-w2-gaules
+    env: docker
+    plan: starter
+    region: oregon
     dockerfilePath: ./Dockerfile
-    buildCommand:               # Nenhum comando extra de build, já que o Dockerfile trata de tudo
-    startCommand:               # O comando padrão virá de CMD no Dockerfile, então deixamos vazio
-    envVars:                     # Variáveis de ambiente que o serviço precisará
+    buildCommand:
+    startCommand:
+    envVars:
       - key: PORT
-        value: "10000"          # Render injeta automaticamente PORT, mas podemos definir um padrão
+        value: "10000"
       - key: DEEPL_API_KEY
-        fromDatabase: deepl_key_secret   # Caso você tenha salvos segredos no “Environment” do Render
+        fromDatabase: deepl_key_secret
       - key: ELEVENLABS_API_KEY
         fromDatabase: elevenlabs_key_secret
       - key: OPENAI_API_KEY
         fromDatabase: openai_key_secret
-      # Adicione aqui quaisquer outras variáveis sensíveis que o backend/pipeline use
-    autoDeploy: true            # Cada push no GitHub dispara redeploy automaticamente
-    public: true                # Se quiser que o serviço seja público (HTTP), mantenha true
-
-databases:
-  # (Não é obrigatório para este projeto específico, mas caso precise de algum DB depois)
-  # - name: my-database
-  #   region: oregon
-  #   plan: hobby-basic
-
-# --------------------------------------------------------
-# Observações importantes:
-#
-# 1. Substitua cada “fromDatabase: <secret_name>” pelos nomes dos seus
-#    segredos configurados em Dashboard → Environment → Secrets (no Render).
-#    Por exemplo, crie no painel do Render:
-#       - deepl_key_secret      = “sua_chave_deepl_aqui”
-#       - elevenlabs_key_secret = “sua_chave_elevenlabs_aqui”
-#       - openai_key_secret     = “sua_chave_openai_aqui”
-#
-# 2. O campo `PORT` normalmente já é injetado pelo Render, mas definimos “10000”
-#    apenas como padrão. Você pode deixá-lo vazio e, no Dashboard, na aba Environment,
-#    adicionar “PORT” sem valor (o Render preenche automaticamente).
-#
-# 3. Com “autoDeploy: true”, cada push no seu repositório GitHub (branch principal)
-#    aciona um novo build/deploy na Render. Se preferir deploy manual, mude para false.
-#
-# 4. O Render irá:
-#     • Usar o Dockerfile na raiz (./Dockerfile) para buildar a imagem.
-#     • No estágio 1, construir o frontend e gerar a pasta dist.
-#     • No estágio 2, instalar dependências Python, copiar backend/pipeline e a dist do frontend.
-#     • Expor a porta $PORT e executar “bash start.sh” conforme definido no Dockerfile.
-#
-# 5. Certifique-se de que todos os três arquivos (Dockerfile, start.sh e requirements.txt)
-#    estejam na raiz do repositório (“livestream-w2-gaules/”), e o frontend/ contenha
-#    index.html e src/, sem mover build/ para fora de frontend/.
-#
-# Após criar este render.yaml na raiz do seu repo e dar push, o Render já detecta e
-# inicia automaticamente o build+deploy. Você não precisa rodar comandos adicionais
-# no terminal – somente configure os segredos conforme indicado e aguarde o deploy.
+    autoDeploy: true
+    public: true
