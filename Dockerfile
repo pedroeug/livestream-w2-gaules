@@ -9,7 +9,6 @@ COPY frontend/package.json ./
 RUN npm cache clean --force
 
 # 2) Instala dependências do frontend sem gerar package-lock.json
-#    (skip do lockfile evita falhas EINTEGRITY)
 RUN npm install --legacy-peer-deps --no-package-lock
 
 # 3) Copia TODO o código do frontend (inclui index.html, src/, vite.config.js, etc.)
@@ -36,8 +35,9 @@ RUN apt-get update && \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3) Copia todo o código do backend e pipeline
+# 3) Copia todo o código do backend, capture e pipeline
 COPY backend/ ./backend/
+COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
 # 4) Copia o frontend compilado do estágio anterior (pasta /app/dist)
