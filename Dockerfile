@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Copia package.json e package-lock.json e instala dependências
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm cache clean --force && npm ci
 
 # Copia todo o código do frontend (inclui index.html) e executa o build
 COPY frontend/ ./
@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY pipeline/ ./pipeline/
 
-# Copia a pasta build do frontend (gerada na etapa anterior)
+# Copia a pasta dist do frontend (gerada na etapa anterior)
 COPY --from=frontend /app/dist ./frontend/dist
 
 # Copia o script de inicialização
