@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# livestream-w2-gaules/start.sh
+#
+# start.sh
+# Script que o Docker vai executar para iniciar o uvicorn
+# (Garantindo que a variável $PORT seja respeitada.)
 
-if [ -z "$PORT" ]; then
-  export PORT=8000
-fi
+set -e
 
-exec uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+echo "=== Iniciando Uvicorn ==="
+exec uvicorn backend.main:app --host 0.0.0.0 --port "${PORT:-8000}"
