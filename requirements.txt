@@ -1,3 +1,5 @@
+# requirements.txt
+
 fastapi
 uvicorn[standard]
 openai
@@ -10,3 +12,4 @@ pydantic
 aiohttp
 numpy
 matplotlib
+openai-whisper
