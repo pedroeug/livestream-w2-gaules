@@ -28,7 +28,13 @@ app.add_middleware(
 # Baixa/verifica o modelo Whisper ao iniciar
 download_all_models()
 
-# Monta o diretório 'frontend/dist' para servir arquivos estáticos do React
+# Garante que a pasta 'hls' exista (onde o pipeline vai gravar os arquivos HLS)
+os.makedirs("hls", exist_ok=True)
+
+# Monta o diretório 'hls' para servir os arquivos HLS (m3u8 e .ts)
+app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
+
+# Monta o diretório 'frontend/dist' para servir os arquivos estáticos do React
 app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 
 
@@ -47,13 +53,19 @@ async def start_stream(channel: str, lang: str, background_tasks: BackgroundTask
     - start_capture grava áudio da Twitch em segmentos de 10s.
     - worker_loop transcreve, traduz, sintetiza e monta HLS.
     """
-    # Cria pasta para salvar segmentos de áudio brutos
-    output_dir = os.path.join("audio_segments", channel)
-    os.makedirs(output_dir, exist_ok=True)
+    # Pasta onde serão colocados os segmentos de áudio brutos
+    audio_dir = os.path.join("audio_segments", channel)
+    os.makedirs(audio_dir, exist_ok=True)
 
-    # Dispara tarefas em background
-    background_tasks.add_task(start_capture, channel, output_dir)
-    background_tasks.add_task(worker_loop, output_dir, lang)
+    # Pasta onde o HLS será gerado: hls/{channel}/{lang}/index.m3u8, etc.
+    hls_dir = os.path.join("hls", channel, lang)
+    os.makedirs(hls_dir, exist_ok=True)
+
+    # Dispara tarefas em background:
+    # 1) Captura áudio em 'audio_segments/{channel}'
+    # 2) Worker processa e grava HLS em 'hls/{channel}/{lang}'
+    background_tasks.add_task(start_capture, channel, audio_dir)
+    background_tasks.add_task(worker_loop, audio_dir, lang)
 
     return {"status": "iniciado", "channel": channel, "lang": lang}
 
