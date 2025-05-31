@@ -1,45 +1,36 @@
-import sys
+# livestream-w2-gaules/capture/recorder.py
+
 import os
 import subprocess
-import numpy as np
-from dotenv import load_dotenv
 
-# Corrige o caminho para encontrar o módulo encoder
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Real-Time-Voice-Cloning'))
+def start_capture(channel_name: str, output_dir: str):
+    """
+    Inicia a captura de áudio do canal Twitch especificado e salva em segmentos de 10 segundos.
+    Usa o ffmpeg para criar arquivos WAV (PCM s16le, 48 kHz, estéreo) em output_dir.
 
-from encoder import inference as encoder
+    Parâmetros:
+    - channel_name: nome do canal Twitch (por exemplo, "gaules")
+    - output_dir: pasta onde os segmentos de áudio serão salvos (por exemplo, "./audio_segments")
+    """
 
-load_dotenv()
-SAMPLE_DURATION = int(os.getenv("SAMPLE_DURATION", 60))
-out = "capture"
-os.makedirs(f"{out}/raw_hls", exist_ok=True)
-os.makedirs(f"{out}/audio_chunks", exist_ok=True)
+    # Garante que a pasta de saída exista
+    os.makedirs(output_dir, exist_ok=True)
 
-def start_capture(channel: str):
-    # grava amostra de voz do Gaules
-    sample_wav = f"{out}/speaker_sample.wav"
-    cmd_sample = (
-        f"streamlink twitch.tv/{channel} best -O | "
-        f"ffmpeg -i pipe:0 -map 0:a -ac 1 -ar 16000 -t {SAMPLE_DURATION} {sample_wav}"
-    )
-    subprocess.run(cmd_sample, shell=True)
+    # Comando ffmpeg para capturar áudio do stream da Twitch e segmentar em arquivos de 10 segundos
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-i", f"https://www.twitch.tv/{channel_name}",
+        "-vn",                             # skip video
+        "-acodec", "pcm_s16le",            # áudio em PCM 16 bits
+        "-ar", "48000",                    # sample rate 48 kHz
+        "-ac", "2",                        # estéreo
+        "-f", "segment",                   # segmenta o stream
+        "-segment_time", "10",             # duração de cada segmento: 10 segundos
+        "-reset_timestamps", "1",          # reseta timestamps a cada segmento
+        f"{output_dir}/segment_%03d.wav"   # nome dos arquivos gerados: segment_000.wav, segment_001.wav, etc.
+    ]
 
-    # gera embedding
-    encoder.load_model("encoder/saved_models/pretrained.pt")
-    wav, sr = encoder.preprocess_wav(sample_wav)
-    embed = encoder.embed_utterance(wav)
-    np.save(f"{out}/speaker_embedding.npy", embed)
-
-    # inicia gravação HLS + chunks áudio
-    cmd = (
-        f"streamlink twitch.tv/{channel} best -O | "
-        "ffmpeg -i pipe:0 "
-        "-c:v copy -c:a copy "
-        "-f hls "
-        "-hls_time 5 -hls_list_size 6 -hls_flags delete_segments "
-        f"{out}/raw_hls/index.m3u8 "
-        "-map 0:a -ac 1 -ar 16000 "
-        "-f segment -segment_time 5 "
-        f"{out}/audio_chunks/chunk_%05d.wav"
-    )
-    subprocess.Popen(cmd, shell=True)
+    # Inicia processo separado, sem bloquear
+    subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
