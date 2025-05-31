@@ -1,10 +1,14 @@
+# requirements.txt (com matplotlib incluído)
+
 fastapi
-uvicorn
-pydantic
-boto3
-numpy
-soundfile
+uvicorn[standard]
+openai
 requests
-python-dotenv
-streamlink
+deep_translator
 elevenlabs
+ffmpeg-python
+python-multipart
+pydantic
+aiohttp
+numpy
+matplotlib
