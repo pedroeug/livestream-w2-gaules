@@ -4,16 +4,21 @@ import React, { useState, useRef, useEffect } from 'react';
 import Hls from 'hls.js';
 
 const App = () => {
+  // 1. Estados para canal e idioma
   const [channel, setChannel] = useState('gaules');
   const [lang, setLang] = useState('en');
+
+  // 2. Referências para o <video> e para o objeto Hls.js
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
 
-  // Função para iniciar o pipeline no backend
+  /**
+   * Dispara o POST /start/{channel}/{lang} no backend
+   */
   const startPipeline = async () => {
     try {
       const url = `${window.location.origin}/start/${encodeURIComponent(channel)}/${encodeURIComponent(lang)}`;
-      const res = await fetch(url, { method: 'POST' });  // ← aqui é crucial: método POST
+      const res = await fetch(url, { method: 'POST' }); // ⬅️ Método POST obrigatório!
       if (!res.ok) {
         console.error('Falha ao iniciar pipeline:', res.status, res.statusText);
       } else {
@@ -24,23 +29,37 @@ const App = () => {
     }
   };
 
-  // Função para tentar carregar o HLS repetidamente até encontrar a playlist
+  /**
+   * Tenta carregar a playlist HLS repetidas vezes até existir
+   */
   const attachHls = () => {
     const playlistUrl = `${window.location.origin}/hls/${encodeURIComponent(channel)}/${encodeURIComponent(lang)}/index.m3u8`;
+
     if (videoRef.current) {
+      // Se já existe um Hls.js em execução, destruímos antes de recriar
       if (hlsRef.current) {
         hlsRef.current.destroy();
+        hlsRef.current = null;
       }
+
       const hls = new Hls();
       hlsRef.current = hls;
       hls.loadSource(playlistUrl);
       hls.attachMedia(videoRef.current);
+
+      // Quando o manifest HLS for carregado, iniciamos o playback
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         console.log('HLS manifest carregado, iniciando playback');
         videoRef.current.play();
       });
+
+      // Se der 404, aguardamos 3s e tentamos novamente
       hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response && data.response.code === 404) {
+        if (
+          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+          data.response &&
+          data.response.code === 404
+        ) {
           console.warn('Playlist não encontrada ainda, tentando novamente em 3s...');
           setTimeout(attachHls, 3000);
         } else {
@@ -50,7 +69,7 @@ const App = () => {
     }
   };
 
-  // Sempre que o usuário clicar em “Start” ou mudar canal/idioma, reiniciamos o processo
+  // Sempre que o canal ou idioma mudar, pausamos o vídeo e destruímos o Hls.js anterior
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.pause();
@@ -59,14 +78,13 @@ const App = () => {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
-    // Tenta iniciar novamente somente se já tivermos feito o POST
-    // (pressionando o botão “Start Pipeline”)
   }, [channel, lang]);
 
   return (
     <div style={{ padding: '1rem', fontFamily: 'sans-serif' }}>
       <h1>LiveDub para Twitch</h1>
 
+      {/* 1) Input para nome do canal */}
       <div style={{ marginBottom: '1rem' }}>
         <label>
           Canal Twitch:{' '}
@@ -79,6 +97,7 @@ const App = () => {
         </label>
       </div>
 
+      {/* 2) Select para idioma de saída */}
       <div style={{ marginBottom: '1rem' }}>
         <label>
           Idioma de saída:{' '}
@@ -90,11 +109,13 @@ const App = () => {
         </label>
       </div>
 
+      {/* 3) Botão para iniciar o pipeline */}
       <div style={{ marginBottom: '1rem' }}>
         <button
           onClick={() => {
+            // 1º dispara o POST /start
             startPipeline().then(() => {
-              // Depois que o POST retornar 200, começamos a checar o HLS
+              // 2º, assim que a resposta 200 chegar, começamos a checar o HLS
               attachHls();
             });
           }}
@@ -103,6 +124,7 @@ const App = () => {
         </button>
       </div>
 
+      {/* 4) Vídeo onde o HLS será anexado */}
       <div>
         <video
           ref={videoRef}
