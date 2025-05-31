@@ -1,10 +1,8 @@
-# Conteúdo completo do start.sh
 #!/usr/bin/env bash
+# livestream-w2-gaules/start.sh
 
-# Faz o build do frontend (se necessário)
-# (Se você já executou o build no Dockerfile, essa etapa pode ser omitida. 
-# Caso queira rebuildar aqui, descomente as linhas abaixo:)
-# cd frontend && npm install && npm run build && cd ..
+if [ -z "$PORT" ]; then
+  export PORT=8000
+fi
 
-# Inicia o backend com Uvicorn na porta definida
-uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+exec uvicorn backend.main:app --host 0.0.0.0 --port $PORT
