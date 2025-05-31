@@ -1,5 +1,3 @@
-# requirements.txt (com matplotlib incluído)
-
 fastapi
 uvicorn[standard]
 openai
