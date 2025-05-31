@@ -1,12 +1,20 @@
-# livestream-w2-gaules/requirements.txt
-
 fastapi
 uvicorn[standard]
-openai-whisper
+openai
 requests
-deep-translator
+deep_translator
+ffmpeg-python
 python-multipart
 pydantic
 aiohttp
 numpy
 matplotlib
+openai-whisper
+
+# Removemos elevenlabs
+# elevenlabs
+
+# Adicionamos Coqui TTS e Torch
+TTS
+torch
+soundfile
