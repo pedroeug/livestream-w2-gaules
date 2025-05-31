@@ -27,20 +27,20 @@ def start_capture(channel_name: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     logger.info(f"Diretório de saída garantido: {output_dir}")
 
-    # Monta o comando para streamlink → ffmpeg
+    log_path = os.path.join(output_dir, "ffmpeg_capture.log")
+    logger.info(f"Salvando logs do ffmpeg em: {log_path}")
+
+    # Método direto usando shell=True e o comando completo com pipe
+    # Este método funciona conforme verificado no teste manual
     cmd_str = (
-        f'streamlink --twitch-disable-hosting twitch.tv/{channel_name} best '
-        f'| ffmpeg -hide_banner -loglevel error -i - -vn '
+        f'streamlink --twitch-disable-hosting twitch.tv/{channel_name} best -O | '
+        f'ffmpeg -hide_banner -loglevel error -i - -vn '
         f'-acodec pcm_s16le -ar 48000 -ac 2 '
         f'-f segment -segment_time 10 -reset_timestamps 1 '
         f'{output_dir}/segment_%03d.wav'
     )
     logger.info(f"Comando completo para captura: {cmd_str}")
 
-    log_path = os.path.join(output_dir, "ffmpeg_capture.log")
-    logger.info(f"Salvando logs do ffmpeg em: {log_path}")
-
-    # Executa o comando via subprocess com shell=True para permitir o uso de pipe
     try:
         with open(log_path, "a") as log_file:
             process = subprocess.Popen(
@@ -59,38 +59,32 @@ def start_capture(channel_name: str, output_dir: str):
             # Tentar novamente com uma abordagem alternativa
             logger.info("Tentando método alternativo de captura...")
             try:
-                # Método alternativo usando dois comandos separados
-                streamlink_cmd = f'streamlink --twitch-disable-hosting twitch.tv/{channel_name} best -O'
-                ffmpeg_cmd = (
-                    f'ffmpeg -hide_banner -loglevel error -i pipe:0 -vn '
-                    f'-acodec pcm_s16le -ar 48000 -ac 2 '
-                    f'-f segment -segment_time 10 -reset_timestamps 1 '
-                    f'{output_dir}/segment_%03d.wav'
-                )
+                # Método alternativo usando script shell temporário
+                script_path = os.path.join(output_dir, "capture_script.sh")
+                with open(script_path, "w") as script_file:
+                    script_file.write("#!/bin/bash\n")
+                    script_file.write(f"streamlink --twitch-disable-hosting twitch.tv/{channel_name} best -O | \\\n")
+                    script_file.write(f"ffmpeg -hide_banner -loglevel error -i - -vn \\\n")
+                    script_file.write(f"-acodec pcm_s16le -ar 48000 -ac 2 \\\n")
+                    script_file.write(f"-f segment -segment_time 10 -reset_timestamps 1 \\\n")
+                    script_file.write(f"{output_dir}/segment_%03d.wav\n")
                 
-                # Executar streamlink e capturar sua saída
-                streamlink_process = subprocess.Popen(
-                    streamlink_cmd,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=log_file
-                )
+                # Tornar o script executável
+                os.chmod(script_path, 0o755)
                 
-                # Alimentar a saída do streamlink para o ffmpeg
-                ffmpeg_process = subprocess.Popen(
-                    ffmpeg_cmd,
-                    shell=True,
-                    stdin=streamlink_process.stdout,
-                    stdout=log_file,
-                    stderr=log_file
-                )
+                # Executar o script
+                with open(log_path, "a") as log_file:
+                    alt_process = subprocess.Popen(
+                        script_path,
+                        shell=True,
+                        stdout=log_file,
+                        stderr=log_file
+                    )
                 
-                # Permitir que streamlink_process seja fechado quando ffmpeg_process terminar
-                streamlink_process.stdout.close()
-                
-                logger.info(f"Método alternativo iniciado. FFmpeg PID: {ffmpeg_process.pid}")
+                logger.info(f"Método alternativo iniciado via script. PID: {alt_process.pid}")
+                return alt_process
             except Exception as e:
-                logger.error(f"Falha no método alternativo: {e}")
+                logger.error(f"Falha no método alternativo via script: {e}")
         
         return process
     except Exception as e:
