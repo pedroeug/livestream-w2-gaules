@@ -11,10 +11,7 @@ numpy
 matplotlib
 openai-whisper
 
-# Removemos elevenlabs
-# elevenlabs
-
-# Adicionamos Coqui TTS e Torch
+# Coqui TTS
 TTS
 torch
 soundfile
