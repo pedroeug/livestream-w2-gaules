@@ -1,13 +1,12 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Configuração básica para um projeto React + Vite
 export default defineConfig({
-  root: '.',                // A raiz do projeto Vite é esta pasta (onde está index.html)
-  base: './',               // Caminho relativo para assets
+  root: '.',                // procura por index.html aqui
+  base: './',               // caminhos relativos para assets
   build: {
-    outDir: 'dist',         // Saída padrão: frontend/dist
-    emptyOutDir: true       // Esvazia pasta dist antes de reconstruir
+    outDir: 'dist',         // gera a pasta frontend/dist
+    emptyOutDir: true       // limpa dist/ antes de cada build
   },
   plugins: [react()]
 })
