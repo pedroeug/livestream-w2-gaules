@@ -5,13 +5,13 @@ from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-# Importa o download de modelos Whisper
-from backend.download_models import download_all_models
+# Importa o download de modelos Whisper (arquivo download_models.py está em backend/)
+from download_models import download_all_models
 
-# Importa a captura de áudio da Twitch
+# Importa a captura de áudio da Twitch (pasta capture/recorder.py no nível da raiz)
 from capture.recorder import start_capture
 
-# Importa o worker que faz transcrição, tradução, síntese e HLS
+# Importa o worker que faz transcrição, tradução, síntese e gera HLS (pasta pipeline/worker.py no nível da raiz)
 from pipeline.worker import worker_loop
 
 app = FastAPI()
@@ -25,19 +25,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Baixa/verifica o modelo Whisper ao iniciar
+# --- 1) Baixa/verifica o modelo Whisper ao iniciar ---
 download_all_models()
 
-# Garante que a pasta 'hls' exista (onde o pipeline vai gravar os arquivos HLS)
+# --- 2) Garante que a pasta 'hls' exista ― e monta como StaticFiles ---
 os.makedirs("hls", exist_ok=True)
+# Monta a pasta local "hls/" na rota "/hls"
+app.mount("/hls", StaticFiles(directory="hls"), name="hls")
 
-# Monta o diretório 'hls' para servir os arquivos HLS (m3u8 e .ts)
-app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
 
-# Monta o diretório 'frontend/dist' para servir os arquivos estáticos do React
+# --- 3) Monta o build gerado pelo React como StaticFiles na raiz "/" ---
+# A pasta "frontend/dist" contém index.html, o JavaScript empacotado, assets, etc.
 app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 
 
+# --- 4) Endpoints da API ---
 @app.get("/health")
 async def health_check():
     """
@@ -50,21 +52,23 @@ async def health_check():
 async def start_stream(channel: str, lang: str, background_tasks: BackgroundTasks):
     """
     Inicia captura e processamento em segundo plano:
-    - start_capture grava áudio da Twitch em segmentos de 10s.
-    - worker_loop transcreve, traduz, sintetiza e monta HLS.
+      - start_capture grava áudio da Twitch em segmentos de 10s dentro de audio_segments/{channel}/
+      - worker_loop transcreve, traduz, sintetiza e gera HLS em hls/{channel}/{lang}/
     """
-    # Pasta onde serão colocados os segmentos de áudio brutos
+
+    # 4.1. Cria (se não existir) a pasta onde os .wav brutos serão armazenados:
     audio_dir = os.path.join("audio_segments", channel)
     os.makedirs(audio_dir, exist_ok=True)
 
-    # Pasta onde o HLS será gerado: hls/{channel}/{lang}/index.m3u8, etc.
+    # 4.2. Cria (se não existir) a pasta onde o HLS será gerado:
+    #       hls/{channel}/{lang}/index.m3u8  e   hls/{channel}/{lang}/000.ts, 001.ts, …
     hls_dir = os.path.join("hls", channel, lang)
     os.makedirs(hls_dir, exist_ok=True)
 
-    # Dispara tarefas em background:
-    # 1) Captura áudio em 'audio_segments/{channel}'
-    # 2) Worker processa e grava HLS em 'hls/{channel}/{lang}'
+    # 4.3. Dispara as tarefas em background ― sem bloquear a resposta HTTP
+    #       a) primeira tarefa: captura de áudio contínua (streamlink → ffmpeg → .wav)
     background_tasks.add_task(start_capture, channel, audio_dir)
+    #       b) segunda tarefa: worker processa cada .wav, gera transcrição, tradução, TTS e segmentos HLS
     background_tasks.add_task(worker_loop, audio_dir, lang)
 
     return {"status": "iniciado", "channel": channel, "lang": lang}
@@ -73,6 +77,8 @@ async def start_stream(channel: str, lang: str, background_tasks: BackgroundTask
 @app.post("/stop/{channel}")
 async def stop_stream(channel: str):
     """
-    Placeholder para parar captura e processamento de um canal.
+    (Opcional) Placeholder para encerrar captura e processamento de um canal.
+    Por ora, apenas responde que “parou”, mas você pode implementar lógica
+    para sinalizar ao start_capture e ao worker_loop que parem suas threads.
     """
     return {"status": "parado", "channel": channel}
