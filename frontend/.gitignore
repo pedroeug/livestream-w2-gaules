@@ -1,0 +1,16 @@
+# Ignorar dependências Python e caches
+__pycache__/
+*.pyc
+.env
+.env.*
+
+# Ignorar node_modules e lockfiles de frontend
+frontend/node_modules/
+frontend/package-lock.json
+frontend/yarn.lock
+
+# Ignorar build outputs não versionados
+frontend/dist/
+
+# Ignorar arquivos de log e caches gerais
+*.log
