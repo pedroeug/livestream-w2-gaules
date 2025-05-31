@@ -15,6 +15,9 @@ from capture.recorder import start_capture
 # (arquivo: pipeline/worker.py)
 from pipeline.worker import worker_loop
 
+# Importa o wrapper de thread para o worker
+from pipeline.worker_thread import start_worker_thread
+
 app = FastAPI()
 
 # -------------------------------------------------------------
@@ -68,7 +71,9 @@ async def start_stream(channel: str, lang: str, background_tasks: BackgroundTask
     #      1) start_capture(channel, audio_dir) –> gera segment_XXX.wav em audio_segments/channel/
     #      2) worker_loop(audio_dir, lang) –> monitora audio_segments/channel/ e gera HLS em hls/channel/lang/
     background_tasks.add_task(start_capture, channel, audio_dir)
-    background_tasks.add_task(worker_loop, audio_dir, lang)
+    
+    # Usando o novo wrapper de thread para o worker_loop
+    start_worker_thread(audio_dir, lang)
 
     return {"status": "iniciado", "channel": channel, "lang": lang}
 
@@ -104,12 +109,12 @@ async def on_startup():
 
 
 # -------------------------------------------------------------
-# 6) Montagem dos diretórios como “arquivos estáticos”
+# 6) Montagem dos diretórios como "arquivos estáticos"
 #
-#    IMPORTANTE: crie as rotas “dinâmicas” ANTES destes mounts.
+#    IMPORTANTE: crie as rotas "dinâmicas" ANTES destes mounts.
 # -------------------------------------------------------------
-# 6.1) Monta a pasta “hls” na rota “/hls” para servir .m3u8 e .ts
+# 6.1) Monta a pasta "hls" na rota "/hls" para servir .m3u8 e .ts
 app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
 
-# 6.2) Monta a pasta “frontend/dist” na raiz para servir o React
+# 6.2) Monta a pasta "frontend/dist" na raiz para servir o React
 app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
