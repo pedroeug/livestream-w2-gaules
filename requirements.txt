@@ -11,7 +11,7 @@ numpy
 matplotlib
 openai-whisper
 
-# Coqui TTS
+# Coqui TTS (voice-cloning)
 TTS
 torch
 soundfile
