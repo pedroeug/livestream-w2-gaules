@@ -1,86 +1,63 @@
+# livestream-w2-gaules/pipeline/worker.py
+
 import os
 import time
-import subprocess
 import whisper
-import requests
-from dotenv import load_dotenv
+from deep_translator import DeeplTranslator
+from elevenlabs import generate, set_api_key
+import subprocess
 
-load_dotenv()
+def worker_loop(audio_dir: str, lang: str):
+    model = whisper.load_model("base")
+    set_api_key(os.getenv("ELEVENLABS_API_KEY"))
 
-DEEPL_KEY    = os.getenv("DEEPL_API_KEY")
-ELEVEN_KEY   = os.getenv("ELEVENLABS_API_KEY")
-ELEVEN_VOICE = os.getenv("ELEVENLABS_VOICE_ID")
+    processed = set()
 
-CAP       = "capture"
-RAW_HLS   = f"{CAP}/raw_hls"
-AUDIO_DIR = f"{CAP}/audio_chunks"
-DUB_HLS   = f"{CAP}/dub_hls"
-os.makedirs(DUB_HLS, exist_ok=True)
-
-# carrega modelo Whisper (ASR)
-model = whisper.load_model("base")
-
-def translate(text: str, target_lang: str) -> str:
-    resp = requests.post(
-        "https://api-free.deepl.com/v2/translate",
-        data={
-          "auth_key": DEEPL_KEY,
-          "text": text,
-          "target_lang": target_lang
-        }
-    )
-    resp.raise_for_status()
-    return resp.json()["translations"][0]["text"]
-
-def synthesize_elevenlabs(text: str, out_path: str):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}"
-    headers = {
-        "xi-api-key": ELEVEN_KEY,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "text": text,
-        "voice_settings": {
-          "stability": 0.7,
-          "similarity_boost": 0.75
-        }
-    }
-    resp = requests.post(url, headers=headers, json=payload, stream=True)
-    resp.raise_for_status()
-    # grava MP3 direto
-    with open(out_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1024):
-            if chunk:
-                f.write(chunk)
-
-def worker_loop(target_lang: str):
-    seen = set()
     while True:
-        for fname in sorted(os.listdir(AUDIO_DIR)):
-            if not fname.endswith(".wav") or fname in seen:
+        # Lista todos os WAVs novos
+        for filename in sorted(os.listdir(audio_dir)):
+            if not filename.endswith(".wav") or filename in processed:
                 continue
-            seen.add(fname)
 
-            wav_path = os.path.join(AUDIO_DIR, fname)
+            wav_path = os.path.join(audio_dir, filename)
+            print(f"[worker] Encontrou novo segmento: {wav_path}")
+
             # 1) Transcrição
-            res = model.transcribe(wav_path, language="pt")
-            text_tgt = translate(res["text"], target_lang)
+            print(f"[worker] Transcrevendo {wav_path} ...")
+            result = model.transcribe(wav_path)
+            text = result["text"]
+            print(f"[worker] Transcrição: {text}")
 
-            # 2) Síntese TTS (ElevenLabs)
-            aac_path = wav_path.replace("audio_chunks", "dub_hls").replace(".wav", ".mp3")
-            synthesize_elevenlabs(text_tgt, aac_path)
+            # 2) Tradução (usar Deepl)
+            print(f"[worker] Traduzindo para {lang} ...")
+            translator = DeeplTranslator(source="auto", target=lang)
+            translated = translator.translate(text)
+            print(f"[worker] Tradução: {translated}")
 
-            # 3) Remux vídeo + áudio dublado
-            seq    = os.path.splitext(fname)[0].split("_")[-1]
-            raw_ts = os.path.join(RAW_HLS,   f"segment{seq}.ts")
-            dub_ts = os.path.join(DUB_HLS,   f"segment{seq}.ts")
-            subprocess.run([
-                "ffmpeg", "-y",
-                "-i", raw_ts,
-                "-i", aac_path,
-                "-c:v", "copy",
-                "-c:a", "aac",
-                dub_ts
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 3) Síntese ElevenLabs
+            print(f"[worker] Síntese ElevenLabs para texto traduzido ...")
+            audio = generate(text=translated, voice="Rachel", model="eleven_multilingual_v1")
+            output_wav = wav_path.replace(".wav", f"_{lang}.wav")
+            with open(output_wav, "wb") as f:
+                f.write(audio)
+            print(f"[worker] Áudio sintetizado salvo em {output_wav}")
 
-        time.sleep(0.5)
+            # 4) Empacotar em HLS (exemplo simplificado):
+            channel = os.path.basename(audio_dir)
+            hls_dir = os.path.join("hls", channel, lang)
+            os.makedirs(hls_dir, exist_ok=True)
+            ts_filename = filename.replace(".wav", f"_{lang}.ts")
+            hls_path = os.path.join(hls_dir, ts_filename)
+            print(f"[worker] Convertendo para TS: {hls_path}")
+            ffmpeg_cmd = (
+                f'ffmpeg -y -i {output_wav} -c:a aac -b:a 128k '
+                f'-hls_time 10 -hls_playlist_type event '
+                f'-hls_segment_filename "{hls_dir}/%03d.ts" '
+                f'{hls_dir}/index.m3u8'
+            )
+            subprocess.run(ffmpeg_cmd, shell=True)
+            print(f"[worker] HLS gerado em {hls_dir}/index.m3u8")
+
+            processed.add(filename)
+
+        time.sleep(1)  # espera antes de checar novamente
