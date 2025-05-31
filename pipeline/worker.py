@@ -56,10 +56,16 @@ def worker_loop(audio_dir: str, lang: str):
                 logger.info(f"Transcrição: {text}")
 
                 # 3) Tradução com DeepL (deep_translator)
-                logger.info(f"Traduzindo para {lang} ...")
-                translator = DeeplTranslator(source="auto", target=lang)
-                translated = translator.translate(text)
-                logger.info(f"Tradução: {translated}")
+                try:
+                    logger.info(f"Traduzindo para {lang} ...")
+                    translator = DeeplTranslator(source="auto", target=lang)
+                    translated = translator.translate(text)
+                    logger.info(f"Tradução: {translated}")
+                except Exception as e_translate:
+                    logger.error(f"Erro ao traduzir via DeepL: {e_translate}")
+                    # marca como processado e pula para o próximo
+                    processed.add(filename)
+                    continue
 
                 # 4) Síntese de voz com Coqui TTS
                 output_wav = wav_path.replace(".wav", f"_{lang}.wav")
