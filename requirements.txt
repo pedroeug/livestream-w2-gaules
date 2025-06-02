@@ -1,7 +1,5 @@
-# Python dependencies
 fastapi
 uvicorn[standard]
-openai
 requests
 deep_translator
 ffmpeg-python
@@ -11,7 +9,4 @@ aiohttp
 numpy
 matplotlib
 openai-whisper
-streamlink
-
-# SDK oficial do Speechify
 speechify-api
