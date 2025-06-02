@@ -1,5 +1,8 @@
+# livestream-w2-gaules/requirements.txt
+
 fastapi
 uvicorn[standard]
+openai
 requests
 deep_translator
 ffmpeg-python
@@ -9,4 +12,4 @@ aiohttp
 numpy
 matplotlib
 openai-whisper
-speechify-api
+speechify-api        # ← SDK oficial Speechify
