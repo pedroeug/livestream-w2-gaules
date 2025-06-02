@@ -1,20 +1,23 @@
 # livestream-w2-gaules/backend/main.py
 
 import os
+import multiprocessing
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from capture.recorder import start_capture
-from pipeline.worker import worker_loop
-import logging
 
-# Configurações de log
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger("backend")
+# Baixa/verifica o modelo Whisper ao iniciar
+from backend.download_models import download_all_models
+
+# Captura de áudio da Twitch
+from capture.recorder import start_capture
+
+# Worker que faz transcrição, tradução, TTS (Speechify) e HLS
+from pipeline.worker import worker_loop
 
 app = FastAPI()
 
-# Permitir CORS de qualquer origem (ajuste se necessário)
+# CORS (ajuste se necessário)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,14 +26,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Garante que as pastas existam ao iniciar
+# Baixa/verifica o modelo Whisper
+download_all_models()
+
+# Garante que a pasta 'hls' exista antes de montar
 os.makedirs("hls", exist_ok=True)
-os.makedirs("audio_segments", exist_ok=True)
 
-# Monta a pasta 'hls' para servir HLS (index.m3u8 e .ts)
-app.mount("/hls", StaticFiles(directory="hls"), name="hls")
+# Monta 'hls' para servir arquivos HLS (.m3u8 e .ts)
+app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
 
-# Monta o build do React em '/'
+# Monta o frontend compilado
 app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 
 
@@ -42,29 +47,31 @@ async def health_check():
 @app.post("/start/{channel}/{lang}")
 async def start_stream(channel: str, lang: str, background_tasks: BackgroundTasks):
     """
-    Inicia a captura (ffmpeg + streamlink) e o loop de worker (transcrição, tradução e TTS).
+    Inicia captura + worker:
+      - start_capture grava segmentos WAV em audio_segments/{channel}
+      - worker_loop transcreve, traduz, TTS (Speechify) e gera HLS em hls/{channel}/{lang}
     """
-    logger.info(f"[backend] Chamando start_stream: canal='{channel}', lang='{lang}'")
-
-    # 1) Diretório onde os WAVs brutos vão ficar:
     audio_dir = os.path.join("audio_segments", channel)
     os.makedirs(audio_dir, exist_ok=True)
 
-    # 2) Diretório onde o HLS será gerado:
     hls_dir = os.path.join("hls", channel, lang)
     os.makedirs(hls_dir, exist_ok=True)
 
-    # 3) Dispara em background as duas tarefas:
+    # Dispara captura em background
     background_tasks.add_task(start_capture, channel, audio_dir)
-    background_tasks.add_task(worker_loop, channel, audio_dir, lang)
 
-    return {"status": "started", "channel": channel, "lang": lang}
+    # Dispara worker em background
+    # NOTE: usamos multiprocessing para não bloquear o thread do FastAPI
+    process = multiprocessing.Process(target=worker_loop, args=(audio_dir, lang))
+    process.daemon = True
+    process.start()
+
+    return {"status": "iniciado", "channel": channel, "lang": lang}
 
 
 @app.post("/stop/{channel}")
 async def stop_stream(channel: str):
     """
-    Placeholder para parar a captura/worker (não implementado aqui).
+    Implementar se necessário para parar captura/worker.
     """
-    logger.info(f"[backend] Chamou stop_stream para canal='{channel}'")
-    return {"status": "stopped", "channel": channel}
+    return {"status": "parado", "channel": channel}
