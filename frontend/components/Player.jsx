@@ -1,36 +1,25 @@
-import React, { useRef, useEffect } from "react";
+// frontend/src/components/Player.jsx
+import { useEffect, useRef } from "react";
 import Hls from "hls.js";
 
-/**
- * Player de HLS via hls.js. Recebe:
- *   - src: URL do index.m3u8 (ex: "/hls/gaules/en/index.m3u8")
- *   - width, height: dimensões
- */
 export default function Player({ src, width, height }) {
-  const videoRef = useRef(null);
+  const videoRef = useRef();
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !src) return;
-
-    // Se o navegador suporta Hls.js:
     if (Hls.isSupported()) {
       const hls = new Hls();
       hls.loadSource(src);
-      hls.attachMedia(video);
+      hls.attachMedia(videoRef.current);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {
-          // autoplay pode ser bloqueado, mas o usuário pode clicar em play depois
-        });
+        videoRef.current.play().catch(console.error);
       });
       return () => {
         hls.destroy();
       };
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari nativo
-      video.src = src;
-      video.addEventListener("loadedmetadata", () => {
-        video.play().catch(() => {});
+    } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
+      videoRef.current.src = src;
+      videoRef.current.addEventListener("loadedmetadata", () => {
+        videoRef.current.play().catch(console.error);
       });
     }
   }, [src]);
@@ -38,10 +27,10 @@ export default function Player({ src, width, height }) {
   return (
     <video
       ref={videoRef}
-      controls
       width={width}
       height={height}
-      style={{ border: "1px solid #444" }}
+      controls
+      style={{ backgroundColor: "#000" }}
     />
   );
 }
