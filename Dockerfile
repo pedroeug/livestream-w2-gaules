@@ -1,18 +1,18 @@
 # livestream-w2-gaules/Dockerfile
 
-# --- Estágio 1: Build do Frontend (Vite) ---
+# --- Estágio 1: Construção do Frontend com Vite ---
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia package.json e limpa cache
+# Copia package.json do frontend e limpa cache
 COPY frontend/package.json ./
 RUN npm cache clean --force
 
-# Instala dependências sem gerar package-lock.json
+# Instala dependências do frontend (sem gerar package-lock.json)
 RUN npm install --legacy-peer-deps --no-package-lock
 
-# Copia todo o código do frontend e executa build
+# Copia todo o código do frontend e executa o build
 COPY frontend/ ./
 RUN npm run build
 
@@ -21,42 +21,34 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências do SO: ffmpeg, streamlink, build-essential, etc.
+# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos, Streamlink
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      ffmpeg \
-      git \
-      curl \
-      build-essential \
-      streamlink \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get install -y ffmpeg git curl build-essential streamlink && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copia e instala dependências Python
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install speechify-sws
 
 # Copia todo o código do backend, capture e pipeline
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia o frontend compilado do estágio 1
+# Copia o frontend compilado do estágio anterior
 COPY --from=frontend /app/dist ./frontend/dist
 
-# Cria as pastas necessárias a frio para evitar erros de montagem
-RUN mkdir -p hls \
-    && mkdir -p audio_segments
+# Copia o script de inicialização e garante permissão
+COPY start.sh ./
+RUN chmod +x start.sh
 
-# Define variável de ambiente e expõe a porta
+# Garante que a pasta "hls" exista antes de montar
+RUN mkdir -p hls
+
+# Define variável de ambiente e expõe a porta padrão (8000)
 ENV PORT=8000
 EXPOSE 8000
 
-# Copia um script de inicialização (por exemplo, start.sh) se você tiver um
-# Se não tiver, podemos inicializar o uvicorn diretamente
-# COPY start.sh ./
-# RUN chmod +x start.sh
-
-# Comando padrão para iniciar o uvicorn
-# Ajuste "backend.main:app" conforme o path do seu main.py
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Comando padrão ao iniciar o contêiner
+CMD ["bash", "start.sh"]
