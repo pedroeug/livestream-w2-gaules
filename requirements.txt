@@ -3,6 +3,7 @@ uvicorn[standard]
 openai
 requests
 deep_translator
+elevenlabs
 ffmpeg-python
 python-multipart
 pydantic
@@ -10,9 +11,4 @@ aiohttp
 numpy
 matplotlib
 openai-whisper
-TTS
-
-
-python-dotenv
-
-streamlink==6.5.1
+speechify-sws
