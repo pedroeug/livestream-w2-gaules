@@ -5,31 +5,32 @@ FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia package.json do frontend e limpa cache
+# Copia apenas package.json (sem package-lock.json) e limpa cache
 COPY frontend/package.json ./
 RUN npm cache clean --force
 
-# Instala dependências do frontend (sem gerar package-lock.json)
+# Instala dependências do frontend sem gerar package-lock.json
 RUN npm install --legacy-peer-deps --no-package-lock
 
 # Copia todo o código do frontend e executa o build
 COPY frontend/ ./
 RUN npm run build
 
+
 # --- Estágio 2: Imagem Final com Backend Python ---
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos, Streamlink
+# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos e Streamlink
 RUN apt-get update && \
     apt-get install -y ffmpeg git curl build-essential streamlink && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python
+# Copia e instala dependências Python (sem speechify-sws)
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install speechify-sws
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia todo o código do backend, capture e pipeline
 COPY backend/ ./backend/
@@ -43,12 +44,9 @@ COPY --from=frontend /app/dist ./frontend/dist
 COPY start.sh ./
 RUN chmod +x start.sh
 
-# Garante que a pasta "hls" exista antes de montar
-RUN mkdir -p hls
-
-# Define variável de ambiente e expõe a porta padrão (8000)
-ENV PORT=8000
-EXPOSE 8000
+# Define variável de ambiente e expõe a porta (o render definirá $PORT automaticamente)
+ENV PORT=$PORT
+EXPOSE $PORT
 
 # Comando padrão ao iniciar o contêiner
 CMD ["bash", "start.sh"]
