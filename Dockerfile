@@ -1,5 +1,3 @@
-# livestream-w2-gaules/Dockerfile
-
 # --- Estágio 1: Construção do Frontend com Vite ---
 FROM node:18 AS frontend
 
@@ -16,7 +14,6 @@ RUN npm install --legacy-peer-deps --no-package-lock
 COPY frontend/ ./
 RUN npm run build
 
-
 # --- Estágio 2: Imagem Final com Backend Python ---
 FROM python:3.11-slim
 
@@ -24,11 +21,15 @@ WORKDIR /app
 
 # Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos e Streamlink
 RUN apt-get update && \
-    apt-get install -y ffmpeg git curl build-essential streamlink && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y \
+      ffmpeg \
+      git \
+      curl \
+      build-essential \
+      streamlink && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python (sem speechify-sws)
+# Copia e instala dependências Python (a partir do requirements.txt enxuto)
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -44,7 +45,7 @@ COPY --from=frontend /app/dist ./frontend/dist
 COPY start.sh ./
 RUN chmod +x start.sh
 
-# Define variável de ambiente e expõe a porta (o render definirá $PORT automaticamente)
+# Define variável de ambiente e expõe a porta
 ENV PORT=$PORT
 EXPOSE $PORT
 
