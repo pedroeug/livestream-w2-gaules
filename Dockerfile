@@ -1,24 +1,24 @@
-# livestream-w2-gaules/Dockerfile
+# livestre­am-w2-gaules/Dockerfile
 
-# --- Etapa 1: Build do frontend com Vite/React ---
+# --- Estágio 1: Construção do Frontend com Vite ---
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia apenas package.json e package-lock.json (se existir) e instala dependências
-COPY frontend/package.json frontend/package-lock.json ./
+# Copia apenas o package.json e instala dependências (não copiamos package-lock.json porque não existe)
+COPY frontend/package.json ./
 RUN npm install --legacy-peer-deps --no-package-lock
 
-# Copia todo o código do frontend e faz o build
+# Copia todo o código-fonte do frontend e gera o build
 COPY frontend/ ./
 RUN npm run build
 
-# --- Etapa 2: Imagem final com backend Python ---
+# --- Estágio 2: Imagem Final com Backend Python ---
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO (FFmpeg, Git, Curl, compiladores e Streamlink)
+# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos e Streamlink
 RUN apt-get update && \
     apt-get install -y ffmpeg git curl build-essential streamlink && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -27,21 +27,24 @@ RUN apt-get update && \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia todo o código do backend, capture e pipeline
+# Copia todo o código-fonte do backend, capture e pipeline
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia o frontend compilado do estágio anterior
+# Copia o build do frontend gerado no estágio anterior
 COPY --from=frontend /app/dist ./frontend/dist
 
-# Cria pastas iniciais (para StaticFiles não falhar)
-RUN mkdir -p hls \
-    && mkdir -p audio_segments
+# Garante que a pasta "hls" exista para a montagem do StaticFiles
+RUN mkdir -p /app/hls
 
-# Define variável de ambiente e expõe a porta
-ENV PORT=8000
-EXPOSE 8000
+# Copia o script de inicialização e garante permissão
+COPY start.sh ./
+RUN chmod +x start.sh
+
+# Expõe a porta que o Render definirá (geralmente $PORT)
+ENV PORT=$PORT
+EXPOSE $PORT
 
 # Comando padrão ao iniciar o contêiner
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["bash", "start.sh"]
