@@ -1,27 +1,36 @@
-# --- Estágio 1: Construção do Frontend com Vite ---
+# ############################################
+# 1) Estágio “frontend”: build do React + Vite
+# ############################################
+
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia apenas package.json (sem package-lock.json) e limpa cache
-COPY frontend/package.json ./
-RUN npm cache clean --force
+# 1.1) Copia apenas package.json e package-lock.json (se existir) PARA instalar dependências
+COPY frontend/package.json ./package.json
+# Se você mantiver um package-lock.json, copie também:
+# COPY frontend/package-lock.json ./package-lock.json
 
-# Instala dependências do frontend sem gerar package-lock.json
+# 1.2) Instala dependências do frontend
 RUN npm install --legacy-peer-deps --no-package-lock
 
-# Copia todo o código do frontend e executa o build
+# 1.3) Copia o restante do código do frontend (incluindo index.html, src/, etc.)
 COPY frontend/ ./
+
+# 1.4) Executa o build do Vite
 RUN npm run build
 
-# --- Estágio 2: Imagem Final com Backend Python ---
+# ############################################
+# 2) Estágio “backend”: imagem final com Python + front compilado
+# ############################################
+
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO: FFmpeg, Git, Curl, compiladores básicos e Streamlink
+# 2.1) Instala dependências de SO para FFmpeg, build tools, streamlink etc.
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
       ffmpeg \
       git \
       curl \
@@ -29,25 +38,25 @@ RUN apt-get update && \
       streamlink && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python (a partir do requirements.txt enxuto)
+# 2.2) Copia e instala dependências Python
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia todo o código do backend, capture e pipeline
+# 2.3) Copia todo o código do backend, capture e pipeline
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia o frontend compilado do estágio anterior
+# 2.4) Copia o front compilado (saído em /app/dist) para dentro desta imagem
 COPY --from=frontend /app/dist ./frontend/dist
 
-# Copia o script de inicialização e garante permissão
+# 2.5) Copia script de inicialização (start.sh) e dá permissão
 COPY start.sh ./
 RUN chmod +x start.sh
 
-# Define variável de ambiente e expõe a porta
+# 2.6) Expõe a porta
 ENV PORT=$PORT
 EXPOSE $PORT
 
-# Comando padrão ao iniciar o contêiner
+# 2.7) Comando final
 CMD ["bash", "start.sh"]
