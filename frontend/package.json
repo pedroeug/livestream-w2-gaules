@@ -6,7 +6,6 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "vite": "^4.0.0"
-    // não precisa mais de hls.js se for só audio MP3
   },
   "scripts": {
     "dev": "vite",
