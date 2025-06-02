@@ -5,25 +5,28 @@ import subprocess
 import shlex
 import logging
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("recorder")
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+
 
 def start_capture(channel_name: str, output_dir: str):
     """
-    Inicia o ffmpeg + streamlink para gravar áudio do canal Twitch em segmentos de 10s (WAV).
+    Inicia o ffmpeg para capturar áudio da Twitch usando streamlink,
+    segmentando em WAVs de 10 segundos em output_dir.
     """
+
     os.makedirs(output_dir, exist_ok=True)
 
     cmd_str = (
-        f'streamlink --twitch-disable-hosting twitch.tv/{channel_name} best -O '
-        f'| ffmpeg -hide_banner -loglevel error -i - -vn '
-        f'-acodec pcm_s16le -ar 48000 -ac 2 '
-        f'-f segment -segment_time 10 -reset_timestamps 1 '
-        f'{output_dir}/segment_%03d.wav'
+        f"streamlink --twitch-disable-hosting twitch.tv/{channel_name} best -O "
+        f"| ffmpeg -hide_banner -loglevel error -i - -vn "
+        f"-acodec pcm_s16le -ar 48000 -ac 2 "
+        f"-f segment -segment_time 10 -reset_timestamps 1 "
+        f"{output_dir}/segment_%03d.wav"
     )
-    logger.info(f"[recorder] Comando completo para captura: {cmd_str}")
 
     log_path = os.path.join(output_dir, "ffmpeg_capture.log")
+    logger.info(f"[recorder] Comando completo para captura: {cmd_str}")
     logger.info(f"[recorder] Salvando logs do ffmpeg em: {log_path}")
 
     with open(log_path, "a") as log_file:
