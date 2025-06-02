@@ -1,5 +1,3 @@
-// frontend/src/App.jsx
-
 import { useState } from "react";
 import Player from "./components/Player";
 
@@ -10,34 +8,47 @@ function App() {
 
   const startPipeline = async () => {
     try {
-      await fetch(`/start/${channel}/${lang}`, { method: "POST" });
+      // Chama o backend exatamente na mesma origem
+      const resp = await fetch(`/start/${channel}/${lang}`, {
+        method: "POST",
+      });
+      if (!resp.ok) {
+        console.error("Falha ao iniciar pipeline:", await resp.text());
+        return;
+      }
       setStarted(true);
     } catch (err) {
-      console.error("Erro ao iniciar pipeline:", err);
+      console.error("Erro ao chamar /start:", err);
     }
   };
 
   return (
-    <div className="App">
+    <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
       <h1>LiveDub com Speechify SWS</h1>
-      <div>
+
+      <div style={{ margin: "1rem 0" }}>
         <label>
-          Canal:
+          Canal:&nbsp;
           <input
             type="text"
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
           />
         </label>
-        <label style={{ marginLeft: "1rem" }}>
-          Idioma:
+
+        <label style={{ marginLeft: "1.5rem" }}>
+          Idioma:&nbsp;
           <select value={lang} onChange={(e) => setLang(e.target.value)}>
             <option value="en">Inglês</option>
             <option value="pt">Português</option>
             <option value="es">Espanhol</option>
           </select>
         </label>
-        <button style={{ marginLeft: "1rem" }} onClick={startPipeline}>
+
+        <button
+          style={{ marginLeft: "1.5rem", padding: "0.5rem 1rem" }}
+          onClick={startPipeline}
+        >
           Iniciar Pipeline
         </button>
       </div>
