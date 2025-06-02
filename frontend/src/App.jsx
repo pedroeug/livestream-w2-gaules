@@ -1,99 +1,135 @@
 // livestream-w2-gaules/frontend/src/App.jsx
 
-import React, { useRef, useEffect, useState } from "react";
-import "./index.css"; // seu CSS global, se houver
+import { useState, useEffect, useRef } from "react";
+import "./App.css"; // Seu CSS habitual, se existir
 
 function App() {
-  const [status, setStatus] = useState("Pronto para iniciar");
   const [channel, setChannel] = useState("gaules");
   const [lang, setLang] = useState("en");
-  const [canPlayAudio, setCanPlayAudio] = useState(false);
-  const audioRef = useRef(null);
+  const [status, setStatus] = useState("idle"); // "idle" | "starting" | "waiting" | "ready" | "error"
+  const [hlsUrl, setHlsUrl] = useState(null);
 
-  // Chama POST /start/{channel}/{lang}
+  // Controle de polling
+  const pollingRef = useRef(null);
+
+  // Função que pergunta ao backend para iniciar o pipeline
   async function startPipeline() {
+    setStatus("starting");
+    setHlsUrl(null);
+
     try {
-      setStatus("Iniciando pipeline...");
-      const res = await fetch(
-        `/start/${encodeURIComponent(channel)}/${encodeURIComponent(lang)}`,
-        { method: "POST" }
-      );
-      if (!res.ok) throw new Error(`Erro ${res.status}`);
-      setStatus("Pipeline iniciado! Aguardando áudio...");
-      setCanPlayAudio(true);
-      // O <audio> estará visível e irá tentar tocar
+      const resp = await fetch(`/start/${channel}/${lang}`, {
+        method: "POST",
+      });
+
+      if (!resp.ok) {
+        throw new Error(`Erro ao iniciar: ${resp.status}`);
+      }
+
+      // Pipeline iniciado com sucesso, agora começamos a “esperar” pelo HLS
+      setStatus("waiting");
+      pollForHls();
     } catch (err) {
       console.error(err);
-      setStatus(`Falha ao iniciar: ${err.message}`);
+      setStatus("error");
     }
   }
 
-  // Sempre que canPlayAudio == true, tentamos tocar
-  useEffect(() => {
-    if (!canPlayAudio) return;
-    const audioEl = audioRef.current;
-    // Garante que o audio tente tocar (sem auto-play falhando):
-    audioEl
-      .play()
-      .then(() => {
-        // Conseguiu iniciar o áudio (mesmo que ainda vazio)
-      })
-      .catch(() => {
-        // Se não conseguir (bloqueio de autoplay), o usuário
-        // pode clicar no próprio controle do <audio> para liberar.
-      });
-  }, [canPlayAudio]);
+  // Função que faz o polling periódico
+  async function pollForHls() {
+    // URL que queremos verificar
+    const url = `/hls/${channel}/${lang}/index.m3u8`;
 
-  // Monta a URL do arquivo MP3 concat
-  const audioUrl = `/audio_segments/${channel}/processed/concat.mp3`;
+    // Função interna que checa uma vez
+    async function checkOnce() {
+      try {
+        // Faz um HEAD para ver se o arquivo já existe
+        const resp = await fetch(url, { method: "HEAD" });
+        if (resp.ok) {
+          // Encontrou HLS → alteramos o estado para “ready”
+          setHlsUrl(url);
+          setStatus("ready");
+          // Para o polling
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        // se status não for 200, continua esperando
+      } catch (e) {
+        // provavelmente 404 ou erro de rede, ignora e tenta de novo
+        console.debug("Ainda não disponível:", url);
+      }
+    }
+
+    // Checa imediatamente e depois a cada 3 s
+    checkOnce();
+    pollingRef.current = setInterval(checkOnce, 3000);
+  }
+
+  // Caso o usuário mude canal/lang no meio do polling, limpamos o intervalo
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+  }, []);
 
   return (
-    <div style={{ padding: 20, fontFamily: "sans-serif" }}>
+    <div className="App" style={{ padding: 20 }}>
       <h1>LiveDub com Speechify SWS</h1>
 
-      <div style={{ marginBottom: "1rem" }}>
+      <div style={{ marginBottom: 20 }}>
         <label>
-          Canal Twitch:{" "}
+          Canal Twitch:&nbsp;
           <input
             type="text"
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
-            style={{ width: 200, marginRight: 20 }}
+            style={{ width: 200 }}
           />
         </label>
-
+        &nbsp;&nbsp;
         <label>
-          Idioma de saída:{" "}
-          <select
-            value={lang}
-            onChange={(e) => setLang(e.target.value)}
-            style={{ marginRight: 20 }}
-          >
-            <option value="en">Inglês (en)</option>
-            <option value="pt">Português (pt)</option>
-            <option value="es">Espanhol (es)</option>
-            {/* Adicione mais se desejar */}
+          Idioma (lang code):&nbsp;
+          <select value={lang} onChange={(e) => setLang(e.target.value)}>
+            <option value="en">en</option>
+            <option value="pt">pt</option>
+            <option value="es">es</option>
+            {/* Adicione outras opções se quiser */}
           </select>
         </label>
-
-        <button onClick={startPipeline}>Iniciar Pipeline</button>
+        &nbsp;&nbsp;
+        <button
+          onClick={startPipeline}
+          disabled={status === "starting" || status === "waiting"}
+        >
+          {status === "idle" && "Iniciar Pipeline"}
+          {status === "starting" && "Iniciando..."}
+          {status === "waiting" && "Aguardando HLS..."}
+        </button>
       </div>
 
-      <p>Status: {status}</p>
+      {status === "error" && (
+        <div style={{ color: "red" }}>
+          Ocorreu um erro ao iniciar o pipeline.
+        </div>
+      )}
 
-      {canPlayAudio && (
-        <div style={{ marginTop: 20 }}>
-          <audio
-            ref={audioRef}
+      {status === "waiting" && (
+        <div style={{ color: "#555" }}>Pipeline iniciado. Aguardando HLS...</div>
+      )}
+
+      {status === "ready" && hlsUrl && (
+        <div>
+          <h2>Player HLS Pronto:</h2>
+          <video
+            style={{ width: "100%", maxWidth: 640 }}
             controls
-            src={audioUrl}
-            style={{ width: "100%", maxWidth: 600 }}
+            autoPlay
+            src={hlsUrl}
           >
-            Seu navegador não suporta elemento de áudio.
-          </audio>
-          <p style={{ fontSize: 12, color: "#555" }}>
-            * o áudio tocará assim que o arquivo concat.mp3 for criado pelo backend e for preenchido pelo worker.
-          </p>
+            Seu navegador não suporta vídeo HTML5.
+          </video>
         </div>
       )}
     </div>
