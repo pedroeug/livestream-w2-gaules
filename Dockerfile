@@ -1,52 +1,52 @@
-# --- Etapa 1: Building do Frontend com Vite ---
+# --- Estágio 1: Build do frontend React com Vite ---
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-# Copia apenas o package.json (sem package-lock.json) e instala dependências
+# 1) Copia só package.json (sem lockfile)
 COPY frontend/package.json ./
+
+# 2) Instala as dependências do frontend
 RUN npm install --legacy-peer-deps --no-package-lock
 
-# Copia todo o código do frontend e executa o build
+# 3) Copia todo o código do frontend e gera build
 COPY frontend/ ./
 RUN npm run build
 
-
-# --- Etapa 2: Imagem final com Backend Python ---
+# --- Estágio 2: Imagem final com Backend Python ---
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências de SO: FFmpeg, git, curl, compiladores e streamlink
+# 1) Instala dependências de SO (FFmpeg, Git, Curl, compiladores, Streamlink)
 RUN apt-get update && \
     apt-get install -y \
       ffmpeg \
       git \
       curl \
       build-essential \
-      streamlink && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+      streamlink \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copia e instala dependências Python
+# 2) Copia requirements e instala dependências Python
 COPY requirements.txt ./
-# Se speechify-sws não existir no PyPI, use a linha comentada abaixo para instalar via Git:
-# RUN pip install --no-cache-dir -r requirements.txt && \
-#     pip install git+https://github.com/speechify/speechify-python-sdk.git
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia todo o código do backend, capture e pipeline
+# 3) Copia o código do backend, capture e pipeline
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia o build estático do frontend produzido na etapa 1
+# 4) Copia o build do frontend gerado no estágio anterior
 COPY --from=frontend /app/dist ./frontend/dist
 
-# Cria as pastas base necessárias (para evitar erro de “Directory 'hls' does not exist”)
-RUN mkdir -p audio_segments && mkdir -p hls
+# 5) Copia script de inicialização e dá permissão
+COPY start.sh ./
+RUN chmod +x start.sh
 
-# Exponha a porta que o FastAPI/uvicorn irá usar
-EXPOSE 8000
+# 6) Expõe a porta (por padrão: 8000)
+ENV PORT=${PORT:-8000}
+EXPOSE ${PORT}
 
-# Comando padrão: inicia o Uvicorn apontando para backend.main:app
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 7) Comando final: executa o start.sh
+CMD ["bash", "start.sh"]
