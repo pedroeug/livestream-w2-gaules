@@ -1,3 +1,4 @@
+# Python dependencies
 fastapi
 uvicorn[standard]
 openai
@@ -11,3 +12,6 @@ numpy
 matplotlib
 openai-whisper
 streamlink
+
+# SDK oficial do Speechify
+speechify-api
