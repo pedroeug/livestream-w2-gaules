@@ -1,62 +1,38 @@
-# ############################################
-# 1) Estágio “frontend”: build do React + Vite
-# ############################################
-
+# Etapa 1: build do frontend
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-# 1.1) Copia apenas package.json e package-lock.json (se existir) PARA instalar dependências
-COPY frontend/package.json ./package.json
-# Se você mantiver um package-lock.json, copie também:
-# COPY frontend/package-lock.json ./package-lock.json
-
-# 1.2) Instala dependências do frontend
-RUN npm install --legacy-peer-deps --no-package-lock
-
-# 1.3) Copia o restante do código do frontend (incluindo index.html, src/, etc.)
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 COPY frontend/ ./
-
-# 1.4) Executa o build do Vite
 RUN npm run build
 
-# ############################################
-# 2) Estágio “backend”: imagem final com Python + front compilado
-# ############################################
-
+# Etapa 2: imagem final com Python
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# 2.1) Instala dependências de SO para FFmpeg, build tools, streamlink etc.
+# 1) Instala pacotes de sistema
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      ffmpeg \
-      git \
-      curl \
-      build-essential \
-      streamlink && \
+    apt-get install -y ffmpeg git curl build-essential streamlink && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 2.2) Copia e instala dependências Python
+# 2) Copia requirements e instala dependências Python
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 2.3) Copia todo o código do backend, capture e pipeline
+# 3) Copia o backend, capture e pipeline
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# 2.4) Copia o front compilado (saído em /app/dist) para dentro desta imagem
+# 4) Copia o build do frontend (após npm run build)
 COPY --from=frontend /app/dist ./frontend/dist
 
-# 2.5) Copia script de inicialização (start.sh) e dá permissão
-COPY start.sh ./
-RUN chmod +x start.sh
+# 5) Expor porta usada pelo Render
+ENV PORT=8000
+EXPOSE 8000
 
-# 2.6) Expõe a porta
-ENV PORT=$PORT
-EXPOSE $PORT
-
-# 2.7) Comando final
-CMD ["bash", "start.sh"]
+# 6) Comando padrão
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
