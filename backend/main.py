@@ -1,28 +1,16 @@
-# livestream-w2-gaules/backend/main.py
-
 import os
 import multiprocessing
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import logging
 
-# Importa o download de modelos Whisper (já no seu projeto)
 from backend.download_models import download_all_models
-
-# Importa a captura de áudio da Twitch
 from capture.recorder import start_capture
-
-# Importa o worker que faz transcrição, tradução, síntese e HLS
 from pipeline.worker import worker_loop
-
-# Configura logging básico
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("backend")
 
 app = FastAPI()
 
-# 1) Rotas de API + CORS
+# 1) Habilita CORS (caso queira chamar de outro domínio)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,70 +19,58 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Health check
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
+# 2) Baixa/verifica o modelo Whisper ao iniciar
+download_all_models()
 
+# 3) Garante as pastas base
+os.makedirs("audio_segments", exist_ok=True)
+os.makedirs("hls", exist_ok=True)
+
+# 4) Define rota POST /start/{channel}/{lang}
 @app.post("/start/{channel}/{lang}")
-async def start_stream(channel: str, lang: str, background_tasks: BackgroundTasks):
+async def start_stream(channel: str, lang: str):
     """
-    Inicia captura (start_capture) e worker_loop em processos separados:
-    - start_capture grava áudio em audio_segments/{channel}/segment_*.wav
-    - worker_loop monitora e gera HLS em hls/{channel}/{lang}/index.m3u8
+    Ao chamar /start/{channel}/{lang}:
+    - Cria pasta audio_segments/{channel}
+    - Cria pasta hls/{channel}/{lang}
+    - Lança start_capture e worker_loop em processos separados
     """
-    logger.info(f"[backend] Iniciando pipeline para canal='{channel}', lang='{lang}'.")
-
-    # 1) Cria diretório de áudio bruto
     audio_dir = os.path.join("audio_segments", channel)
     os.makedirs(audio_dir, exist_ok=True)
-    logger.info(f"[backend] Diretório de áudio garantido: {audio_dir}")
 
-    # 2) Cria diretório HLS
     hls_dir = os.path.join("hls", channel, lang)
     os.makedirs(hls_dir, exist_ok=True)
-    logger.info(f"[backend] Diretório HLS garantido: {hls_dir}")
 
-    # 3) Dispara captura e worker em processos separados
-    #    Usamos multiprocessing.Process para que não bloqueie a thread de FastAPI
-    def _run_capture():
-        logger.info(f"[backend] [recorder] Diretório de saída garantido: {audio_dir}")
-        start_capture(channel, audio_dir)
+    # 5) Cria um HLS inicial de 1s de silêncio para não dar 404 imediato
+    initial_index = os.path.join(hls_dir, "index.m3u8")
+    if not os.path.exists(initial_index):
+        os.system(
+            f"ffmpeg -y -f lavfi -i anullsrc=r=16000:cl=mono -t 1 "
+            f"-c:a aac -b:a 64k -hls_time 1 "
+            f"-hls_playlist_type event "
+            f"-hls_segment_filename {hls_dir}/%03d.ts "
+            f"{initial_index}"
+        )
 
-    def _run_worker():
-        worker_loop(audio_dir, lang)
-
-    p1 = multiprocessing.Process(target=_run_capture)
+    # 6) Lança captura e worker em processos independentes
+    p1 = multiprocessing.Process(target=start_capture, args=(channel, audio_dir))
     p1.daemon = True
     p1.start()
-    logger.info(f"[backend] [backend] Processo de captura iniciado com PID {p1.pid}.")
 
-    p2 = multiprocessing.Process(target=_run_worker)
+    p2 = multiprocessing.Process(target=worker_loop, args=(channel, lang))
     p2.daemon = True
     p2.start()
-    logger.info(f"[backend] [backend] Processo de worker iniciado com PID {p2.pid}.")
 
     return {"status": "iniciado", "channel": channel, "lang": lang}
 
 
-@app.post("/stop/{channel}")
-async def stop_stream(channel: str):
-    """
-    Endpoint placeholder para eventualmente parar captura e processamento.
-    """
-    # (implementação de parada ficaria aqui)
-    return {"status": "parado", "channel": channel}
+# 7) Monta diretório hls para servir .m3u8 e .ts
+app.mount("/hls", StaticFiles(directory="hls"), name="hls")
 
-
-# 2) Somente depois de declarar todas as rotas, montamos o frontend estático
-# Monta o diretório 'hls' para servir .m3u8 e .ts
-os.makedirs("hls", exist_ok=True)
-app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
-
-# Monta o diretório do build do React (frontend/dist) 
-# para servir HTML/JS/CSS em todas as outras rotas GET
-os.makedirs("frontend/dist", exist_ok=True)
+# 8) Monta frontend estático em /
 app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 
-# 3) Download dos modelos Whisper na inicialização
-download_all_models()
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
