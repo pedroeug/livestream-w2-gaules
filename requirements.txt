@@ -10,4 +10,4 @@ aiohttp
 numpy
 matplotlib
 openai-whisper
-speechify-sws
+streamlink
