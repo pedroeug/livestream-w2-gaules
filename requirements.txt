@@ -1,6 +1,6 @@
 fastapi==0.103.1
 uvicorn[standard]==0.23.0
-openai-whisper==2025.05.0
+openai-whisper==20240930
 deep-translator==1.11.1
 requests==2.31.0
 speechify-api==1.0.0
