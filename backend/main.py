@@ -1,21 +1,18 @@
-# livestream-w2-gaules/backend/main.py
+# backend/main.py
 
 import os
 import multiprocessing
-import logging
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-# Importa o recorder e worker
-from capture.recorder import start_capture
 from pipeline.worker import worker_loop
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("backend")
+from capture.recorder import start_capture
+from backend.download_models import download_all_models
 
 app = FastAPI()
 
+# 1) Configura CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,56 +21,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Ao iniciar, garante as pastas estáticas existirem
-os.makedirs("hls", exist_ok=True)
-os.makedirs("audio_segments", exist_ok=True)
+# 2) Baixa/verifica o modelo Whisper ao iniciar
+download_all_models()
 
-# Monta o diretório 'hls' para servir os arquivos HLS (m3u8 e .ts)
-app.mount("/hls", StaticFiles(directory="hls"), name="hls")
-# Monta o diretório 'frontend/dist' para servir o build do React
-app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
-
-
+# 3) Health check
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
 
-
+# 4) Rota para iniciar o pipeline (POST)
 @app.post("/start/{channel}/{lang}")
 async def start_stream(channel: str, lang: str, background_tasks: BackgroundTasks):
     """
-    Inicia captura + worker em processos separados:
-      - start_capture: grava áudio bruto em segmentos .wav
-      - worker_loop: transcreve, traduz, sintetiza com Speechify e gera HLS
+    Inicia captura e processamento em segundo plano:
+      - start_capture grava áudio da Twitch em segmentos de 10s em audio_segments/{channel}/
+      - worker_loop transcreve, traduz, sintetiza e gera HLS em hls/{channel}/{lang}/
     """
-    logger.info(f"[backend] Iniciando pipeline para canal='{channel}', lang='{lang}'.")
-
-    # 1) Cria a pasta de áudio bruto (segmentos .wav)
+    # Diretório de áudio cru
     audio_dir = os.path.join("audio_segments", channel)
     os.makedirs(audio_dir, exist_ok=True)
-    logger.info(f"[backend] Diretório de áudio garantido: {audio_dir}")
 
-    # 2) Cria a pasta onde o HLS será gerado
+    # Diretório onde o HLS será gerado
     hls_dir = os.path.join("hls", channel, lang)
     os.makedirs(hls_dir, exist_ok=True)
-    logger.info(f"[backend] Diretório HLS garantido: {hls_dir}")
 
-    # 3) Inicia o processo de captura (streamlink + ffmpeg) e o worker
-    #    Vamos usar multiprocessing.Process para que fiquem fora do contexto do FastAPI
-    p_capture = multiprocessing.Process(target=start_capture, args=(channel, audio_dir), daemon=True)
-    p_capture.start()
-    logger.info(f"[backend] [backend] Processo de captura iniciado com PID {p_capture.pid}.")
-
-    p_worker = multiprocessing.Process(target=worker_loop, args=(audio_dir, lang), daemon=True)
-    p_worker.start()
-    logger.info(f"[backend] [backend] Processo de worker iniciado com PID {p_worker.pid}.")
+    # Adiciona as tarefas em background
+    background_tasks.add_task(start_capture, channel, audio_dir)
+    background_tasks.add_task(worker_loop, audio_dir, lang)
 
     return {"status": "iniciado", "channel": channel, "lang": lang}
 
 
+# 5) Rota para parar (pode implementar lógica de parada depois)
 @app.post("/stop/{channel}")
 async def stop_stream(channel: str):
-    """
-    (Opcional) Endpoint para parar captura/worker; pode ser implementado conforme necessidade.
-    """
     return {"status": "parado", "channel": channel}
+
+
+# 6) Agora sim, monta a pasta “hls” para servir os .m3u8 e .ts
+os.makedirs("hls", exist_ok=True)  # garante existência para não dar erro no mount
+app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
+
+# 7) Por fim, monta o build do React em “/”
+#    – Observe que esse mount só aparece **depois** das rotas acima
+app.mount(
+    "/",
+    StaticFiles(directory="frontend/dist", html=True),
+    name="frontend"
+)
