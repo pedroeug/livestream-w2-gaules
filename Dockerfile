@@ -1,39 +1,50 @@
-# Etapa 1: build do React
+# ──── etapa‐1: build do React com Vite ────
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-COPY frontend/package.json frontend/package-lock.json ./
+# 1) Copia apenas o package.json (não há package-lock.json)
+COPY frontend/package.json ./
+
+# 2) Instala as dependências sem gerar package-lock.json
 RUN npm install --legacy-peer-deps --no-package-lock
 
+# 3) Copia todo o código do frontend e roda o build
 COPY frontend/ ./
 RUN npm run build
 
-# Etapa final: backend Python
+
+# ──── etapa‐2: imagem final com Python (FastAPI + Whisper + Speechify) ────
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala pacotes de SO 
+# 1) Instala pacotes de sistema (FFmpeg, git, curl, compiladores e streamlink)
 RUN apt-get update && \
-    apt-get install -y ffmpeg git curl build-essential streamlink && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get install -y \
+      ffmpeg \
+      git \
+      curl \
+      build-essential \
+      streamlink && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copia requirements e instala
+# 2) Copia e instala dependências Python
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Garante diretório hls
+# 3) Garante que a pasta hls exista (para não quebrar o app.mount lá no FastAPI)
 RUN mkdir -p hls
 
-# Copia todo o código Python
+# 4) Copia todo o código do backend, do capture e do pipeline
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# Copia build estático do React
+# 5) Copia o build estático do React gerado na etapa-1
 COPY --from=frontend /app/dist ./frontend/dist
 
-# Expõe variável de porta e arranca
+# 6) Expõe a porta padrão do uvicorn e define o CMD
 EXPOSE 8000
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
