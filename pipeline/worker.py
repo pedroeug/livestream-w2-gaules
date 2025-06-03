@@ -3,145 +3,155 @@
 import os
 import time
 import whisper
-import base64
+from deep_translator import DeeplTranslator
 import requests
 import subprocess
-from deep_translator import DeeplTranslator
+from queue import Queue
 
-# ========== CONFIGURAÇÃO DO SPEECHIFY ==========
-# Sua chave de API do Speechify (defina em SPEECHIFY_API_KEY no ambiente)
-API_KEY = os.getenv("SPEECHIFY_API_KEY", "")
-# O Voice ID que você quer usar (voz clonada do Gaules, por exemplo)
-VOICE_ID = "3af44bf3-439e-4e9d-a6ff-4870d437ef7a"
-# Endpoint base do Speechify TTS REST
-SPEECHIFY_URL = "https://api.speechify.com/v1/tts/audio/speech"
-# ===============================================
-
-def worker_loop(audio_dir: str, lang: str):
+def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
     """
-    Loop contínuo que faz:
-      1. Monitora novos arquivos .wav em audio_dir.
-      2. Transcreve com Whisper (forçando português no exemplo).
-      3. Traduz para o idioma 'lang' via DeepL.
-      4. Chama o endpoint REST do Speechify para gerar MP3 base64.
-      5. Decodifica e salva cada segmento como MP3.
-      6. Concatena todos os MP3s num único concat.mp3 contínuo.
-      7. Gera HLS (index.m3u8 + .ts) a partir do concat.mp3.
+    Loop contínuo que:
+      1. Monitora novos .wav em audio_dir
+      2. Transcreve com Whisper
+      3. Traduz com DeepL
+      4. Sintetiza com Speechify (ou Coqui, se quiser)
+      5. Gera HLS em hls/{channel}/{lang}/
+      6. Cada passo envia uma mensagem para log_queue.put("texto")
     """
-
-    # 1) Carrega o modelo Whisper "base" (produzido pela OpenAI).
+    # 1) Carrega o modelo Whisper
     model = whisper.load_model("base")
+    log_queue.put("[worker] Modelo Whisper carregado (base).")
 
-    # Conjunto para marcar quais arquivos já foram processados
+    # 2) Configura credenciais Speechify (via env var SPEECHIFY_API_KEY)
+    speechify_key = os.getenv("SPEECHIFY_API_KEY")
+    speechify_voice_id = os.getenv("SPEECHIFY_VOICE_ID")  # ex: "3af44bf3-..."
+    if not speechify_key or not speechify_voice_id:
+        log_queue.put("[worker] AVISO: SPEECHIFY_API_KEY ou SPEECHIFY_VOICE_ID não definido. TTS será pulado.")
+    else:
+        log_queue.put("[worker] Speechify configurado corretamente.")
+
     processed = set()
 
-    # Cria pasta "processed" dentro de audio_dir, onde serão salvos os MP3s e o concat.mp3
-    processed_dir = os.path.join(audio_dir, "processed")
-    os.makedirs(processed_dir, exist_ok=True)
-
-    # Caminho absoluto para o MP3 contínuo inicial
-    concat_mp3 = os.path.join(processed_dir, "concat.mp3")
-    # Se não existe ainda, cria um MP3 mínimo (silêncio de 0.1s) para evitar erro de concat
-    if not os.path.exists(concat_mp3):
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
-            "-c:a", "libmp3lame", "-b:a", "128k",
-            "-t", "0.1",
-            concat_mp3
-        ], check=True)
-
     while True:
-        # 2) Varre todos os WAVs na pasta, em ordem alfabética
+        # 3) Para cada arquivo .wav não processado:
         for filename in sorted(os.listdir(audio_dir)):
             if not filename.endswith(".wav") or filename in processed:
                 continue
 
             wav_path = os.path.join(audio_dir, filename)
-            print(f"[worker] Processando segmento: {wav_path}")
+            log_queue.put(f"[worker] Encontrado novo segmento: {wav_path}")
 
             try:
-                # --- Transcrição via Whisper (forçando PT) ---
-                print(f"[worker] Transcrevendo (PT) {wav_path} ...")
-                result = model.transcribe(wav_path, language="pt")
-                text_pt = result["text"].strip()
-                print(f"[worker] Texto extraído (PT): {text_pt}")
+                # --- Transcrição ---
+                log_queue.put(f"[worker] Transcrevendo {wav_path} ...")
+                result = model.transcribe(wav_path, language="pt")  # força Português
+                text = result["text"].strip()
+                log_queue.put(f"[worker] Transcrição: {text}")
 
-                # --- Tradução via DeepL ---
-                print(f"[worker] Traduzindo para {lang} ...")
+                # --- Tradução DeepL ---
+                log_queue.put(f"[worker] Traduzindo para {lang} ...")
                 translator = DeeplTranslator(source="auto", target=lang)
-                translated = translator.translate(text_pt)
-                print(f"[worker] Texto traduzido ({lang}): {translated}")
+                translated = translator.translate(text)
+                log_queue.put(f"[worker] Tradução: {translated}")
 
-                # --- Chamada HTTP ao Speechify (gera MP3 base64) ---
-                if not API_KEY:
-                    raise RuntimeError("SPEECHIFY_API_KEY não definido no ambiente")
-                print("[worker] Chamando Speechify REST para TTS (MP3 base64) ...")
-                payload = {
-                    "voiceId": VOICE_ID,
-                    "input": translated
-                }
-                headers = {
-                    "Authorization": f"Bearer {API_KEY}",
-                    "Content-Type": "application/json"
-                }
-                resp = requests.post(SPEECHIFY_URL, headers=headers, json=payload, timeout=30)
-                resp.raise_for_status()
+                # --- Síntese Speechify (via HTTP) ---
+                if speechify_key and speechify_voice_id:
+                    log_queue.put("[worker] Sintetizando com Speechify ...")
+                    # Monta payload para Speechify:
+                    headers = {
+                        "Authorization": f"Bearer {speechify_key}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "voiceId": speechify_voice_id,
+                        "input": translated
+                    }
+                    # Faz request:
+                    response = requests.post(
+                        "https://api.sws.speechify.com/v1/tts/audio",
+                        json=payload,
+                        headers=headers
+                    )
+                    if response.status_code != 200:
+                        log_queue.put(f"[worker] Erro Speechify ({response.status_code}): {response.text}")
+                        processed.add(filename)
+                        continue
 
-                data = resp.json()
-                audio_base64 = data.get("audioData")
-                if not audio_base64:
-                    raise RuntimeError("Resposta Speechify não retornou audioData")
+                    audio_data_base64 = response.json().get("audioData")
+                    if not audio_data_base64:
+                        log_queue.put(f"[worker] Erro: resposta Speechify sem campo audioData.")
+                        processed.add(filename)
+                        continue
 
-                # Decode do base64 para bytes MP3
-                audio_bytes = base64.b64decode(audio_base64)
+                    # Converte base64 → binário e salva em wav temporário:
+                    from base64 import b64decode
+                    temp_wav = wav_path.replace(".wav", f"_{lang}.wav")
+                    with open(temp_wav, "wb") as f:
+                        f.write(b64decode(audio_data_base64))
+                    log_queue.put(f"[worker] Áudio Speechify salvo em {temp_wav}")
+                else:
+                    log_queue.put("[worker] Pulando síntese: credenciais Speechify não configuradas.")
+                    processed.add(filename)
+                    continue
 
-                # Salva o MP3 do segmento gerado
-                dubbed_mp3 = os.path.join(
-                    processed_dir,
-                    filename.replace(".wav", f"_{lang}.mp3")
+                # --- Converte wav para mp3 (para concatenar) ---
+                log_queue.put(f"[worker] Convertendo WAV para MP3: {temp_wav}")
+                mp3_path = temp_wav.replace(".wav", ".mp3")
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", temp_wav, "-codec:a", "libmp3lame", mp3_path],
+                    check=True
                 )
-                with open(dubbed_mp3, "wb") as f:
-                    f.write(audio_bytes)
-                print(f"[worker] Áudio MP3 salvo em: {dubbed_mp3}")
+                log_queue.put(f"[worker] MP3 gerado: {mp3_path}")
 
-                # --- Concatena ao MP3 contínuo existente ---
-                temp_concat = concat_mp3 + ".temp.mp3"
-                subprocess.run([
-                    "ffmpeg", "-y",
-                    "-i", f"concat:{concat_mp3}|{dubbed_mp3}",
-                    "-c", "copy",
-                    temp_concat
-                ], check=True)
-                os.replace(temp_concat, concat_mp3)
-                print(f"[worker] Arquivo contínuo atualizado: {concat_mp3}")
+                # --- Concatena no “concat.mp3” contínuo ---
+                channel = os.path.basename(audio_dir)
+                processed_dir = os.path.join(audio_dir, "processed")
+                os.makedirs(processed_dir, exist_ok=True)
+                concat_mp3 = os.path.join(processed_dir, "concat.mp3")
+                if not os.path.exists(concat_mp3):
+                    # Se não existe, cria um mp3 vazio com um segundo de silêncio
+                    silent = os.path.join(processed_dir, "silent.wav")
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", 
+                         "-t", "0.1", "-q:a", "9", silent],
+                        check=True
+                    )
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", silent, "-codec:a", "libmp3lame", concat_mp3],
+                        check=True
+                    )
+                    log_queue.put(f"[worker] Arquivo inicial concat.mp3 criado em {concat_mp3}")
 
-                # --- Geração de HLS (m3u8 + .ts) a partir do MP3 contínuo ---
-                channel = os.path.basename(os.path.dirname(audio_dir))
+                # Agora concatena: concat|novo → temp → substitui
+                log_queue.put(f"[worker] Adicionando {mp3_path} ao concat.mp3")
+                temp_out = concat_mp3 + ".temp"
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", f"concat:{concat_mp3}|{mp3_path}", "-acodec", "copy", temp_out],
+                    check=True
+                )
+                os.replace(temp_out, concat_mp3)
+                log_queue.put(f"[worker] concat.mp3 atualizado com {mp3_path}")
+
+                # --- Gera HLS ---
                 hls_dir = os.path.join("hls", channel, lang)
                 os.makedirs(hls_dir, exist_ok=True)
-
                 ts_pattern = os.path.join(hls_dir, "%03d.ts")
-                index_m3u8 = os.path.join(hls_dir, "index.m3u8")
+                output_index = os.path.join(hls_dir, "index.m3u8")
+                log_queue.put(f"[worker] Gerando HLS em {output_index} ...")
                 subprocess.run([
-                    "ffmpeg", "-y",
-                    "-i", concat_mp3,
-                    "-c:a", "aac", "-b:a", "128k",
-                    "-vn",
+                    "ffmpeg", "-y", "-i", concat_mp3,
+                    "-c:a", "aac", "-b:a", "128k", "-vn",
                     "-hls_time", "10",
                     "-hls_playlist_type", "event",
                     "-hls_segment_filename", ts_pattern,
-                    index_m3u8
+                    output_index
                 ], check=True)
-                print(f"[worker] HLS gerado em: {index_m3u8}")
+                log_queue.put(f"[worker] HLS gerado em {output_index}")
 
-                # Marca como "processado", para não repetir
                 processed.add(filename)
 
             except Exception as e:
-                # Em caso de qualquer erro, ainda marca como processado para não travar
-                print(f"[worker] Erro ao processar {wav_path}: {e}")
+                log_queue.put(f"[worker] ERRO ao processar {wav_path}: {e}")
                 processed.add(filename)
 
-        # Espera 1 segundo antes de checar novamente
         time.sleep(1)
