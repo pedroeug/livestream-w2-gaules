@@ -1,52 +1,39 @@
-# livestream-w2-gaules/Dockerfile
-
-# --- Estágio 1: Build do Frontend com Vite ---
+# Etapa 1: build do React
 FROM node:18 AS frontend
 
 WORKDIR /app
 
-# 1) Copia package.json do frontend (remoção de comentários foi feita manualmente no package.json)
-COPY frontend/package.json ./  
-# (Não temos package-lock.json; o npm instalará com base em package.json)
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm install --legacy-peer-deps --no-package-lock
 
-# 2) Copia todo o código do frontend e faz o build
 COPY frontend/ ./
 RUN npm run build
 
-
-# --- Estágio 2: Imagem final com Backend Python ---
+# Etapa final: backend Python
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# 1) Instala dependências de SO: FFmpeg, Git, Curl, compiladores e Streamlink
+# Instala pacotes de SO 
 RUN apt-get update && \
     apt-get install -y ffmpeg git curl build-essential streamlink && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 2) Copia e instala dependências Python (incluindo speechify-api)
+# Copia requirements e instala
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3) Cria a pasta hls de antemão (evita erro no mount)
-RUN mkdir -p /app/hls
+# Garante diretório hls
+RUN mkdir -p hls
 
-# 4) Copia o código do backend, capture e pipeline
+# Copia todo o código Python
 COPY backend/ ./backend/
 COPY capture/ ./capture/
 COPY pipeline/ ./pipeline/
 
-# 5) Copia o build do frontend gerado no estágio anterior
+# Copia build estático do React
 COPY --from=frontend /app/dist ./frontend/dist
 
-# 6) Copia o script de inicialização e dá permissão de execução
-COPY start.sh ./
-RUN chmod +x start.sh
-
-# 7) Expõe porta (o Render definirá ENV PORT)
-ENV PORT=$PORT
-EXPOSE $PORT
-
-# 8) Comando padrão
-CMD ["bash", "start.sh"]
+# Expõe variável de porta e arranca
+EXPOSE 8000
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
