@@ -1,15 +1,13 @@
-# livestream-w2-gaules/requirements.txt
-
-fastapi
-uvicorn[standard]
-openai
-requests
-deep_translator
-ffmpeg-python
-python-multipart
-pydantic
-aiohttp
-numpy
-matplotlib
-openai-whisper
-speechify-api        # ← SDK oficial Speechify
+fastapi==0.103.1
+uvicorn[standard]==0.23.0
+openai-whisper==2025.05.0
+deep-translator==1.11.1
+requests==2.31.0
+speechify-api==1.0.0
+ffmpeg-python==0.2.0
+python-multipart==0.0.6
+pydantic==1.10.9
+aiohttp==3.8.4
+numpy==1.24.4
+matplotlib==3.7.1
+python-dotenv==1.0.0
