@@ -1,6 +1,6 @@
 {
-  "name": "livestream-w2-gaules-frontend",
-  "version": "0.0.1",
+  "name": "livestream-w2-gaules",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "vite",
@@ -9,11 +9,10 @@
   },
   "dependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "hls.js": "^1.4.2"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "vite": "^4.0.0",
-    "@vitejs/plugin-react": "^4.0.0"
+    "@vitejs/plugin-react": "^3.1.0"
   }
 }
