@@ -1,49 +1,53 @@
-# --- Estágio 1: Build do Frontend com Vite ---
-FROM node:18 AS frontend
+# ----------- Stage 1: Build do Frontend -----------
+FROM node:18-alpine AS frontend
 
-WORKDIR /app
+# Diretório de trabalho para o build do frontend
+WORKDIR /app/frontend
 
-# 1) Copia só o package.json (não há package-lock.json)
+# Copia apenas o package.json (sem package-lock.json) e instala dependências
 COPY frontend/package.json ./
+RUN npm install --legacy-peer-deps --no‐package‐lock
 
-# 2) Instala dependências do frontend
-RUN npm install --legacy-peer-deps --no-package-lock
-
-# 3) Copia o restante do frontend e executa o build
+# Copia todo o código do frontend e executa o build de produção
 COPY frontend/ ./
 RUN npm run build
 
 
-# --- Estágio 2: Backend em Python ---
+# ----------- Stage 2: Backend + Assets Estáticos -----------
 FROM python:3.11-slim
 
+# Diretório de trabalho do backend
 WORKDIR /app
 
-# 4) Dependências de SO
+# Instala dependências do sistema (ffmpeg, streamlink etc.)
 RUN apt-get update && \
-    apt-get install -y ffmpeg git curl build-essential streamlink && \
+    apt-get install -y \
+      ffmpeg \
+      git \
+      curl \
+      build-essential \
+      streamlink && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 5) Copia e instala dependências Python
+# Copia o arquivo de requirements e instala as dependências Python
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 6) Cria pasta hls antecipadamente
-RUN mkdir -p /app/hls
+# Cria as pastas vazias necessárias à execução
+RUN mkdir -p audio_segments hls
 
-# 7) Copia o código Python
-COPY backend/ ./backend/
-COPY capture/ ./capture/
-COPY pipeline/ ./pipeline/
+# Copia o código-fonte do backend e pipeline
+COPY backend/ ./backend
+COPY pipeline/ ./pipeline
 
-# 8) Copia o frontend compilado do “estágio frontend”
-COPY --from=frontend /app/dist ./frontend/dist
+# Se você tiver um arquivo .env, descomente a linha abaixo:
+# COPY .env ./
 
-# 9) Copia o script de startup
-COPY start.sh ./
-RUN chmod +x start.sh
+# Copia os arquivos estáticos gerados no frontend para dentro do contêiner
+COPY --from=frontend /app/frontend/dist ./frontend_dist
 
+# Expõe a porta usada pelo Uvicorn (opcional, pois o Render detecta automaticamente)
 EXPOSE 8000
-ENV PORT 8000
 
-CMD ["bash", "start.sh"]
+# Comando padrão para iniciar a aplicação
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
