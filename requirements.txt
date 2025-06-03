@@ -10,4 +10,4 @@ matplotlib==3.7.2
 ffmpeg-python==0.2.0
 pydantic==2.6.2
 python-multipart==0.0.6
-speechify-api==0.1.0         # versão hipotética do SDK oficial (confirme via pip search)
+speechify-api==1.2.0         # versão hipotética do SDK oficial (confirme via pip search)
