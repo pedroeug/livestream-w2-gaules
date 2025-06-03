@@ -1,27 +1,27 @@
 // frontend/src/components/Player.jsx
-
-import React from "react";
+import { useEffect, useRef } from "react";
 import Hls from "hls.js";
 
 export default function Player({ src, width, height }) {
-  const videoRef = React.useRef();
+  const videoRef = useRef();
 
-  React.useEffect(() => {
-    if (Hls.isSupported()) {
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Se o navegador suportar HLS nativo (Safari, iOS), basta atribuir src direto
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = src;
+    }
+    // Caso contrário, usar hls.js para montar o stream
+    else if (Hls.isSupported()) {
       const hls = new Hls();
       hls.loadSource(src);
-      hls.attachMedia(videoRef.current);
-      hls.on(Hls.Events.MANIFEST_PARSED, function () {
-        videoRef.current.play();
-      });
+      hls.attachMedia(video);
+      // opcional: cleanup ao desmontar
       return () => {
         hls.destroy();
       };
-    } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
-      videoRef.current.src = src;
-      videoRef.current.addEventListener("loadedmetadata", () => {
-        videoRef.current.play();
-      });
     }
   }, [src]);
 
@@ -29,7 +29,9 @@ export default function Player({ src, width, height }) {
     <video
       ref={videoRef}
       controls
-      style={{ width: width, height: height, background: "#000" }}
+      width={width}
+      height={height}
+      style={{ backgroundColor: "black" }}
     />
   );
 }
