@@ -39,6 +39,7 @@ RUN mkdir -p audio_segments hls
 # Copia o código-fonte do backend e pipeline
 COPY backend/ ./backend
 COPY pipeline/ ./pipeline
+COPY capture/ ./capture
 
 # Se você tiver um arquivo .env, descomente a linha abaixo:
 # COPY .env ./
