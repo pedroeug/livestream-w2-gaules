@@ -76,4 +76,6 @@ async def start_pipeline(channel: str, lang: str):
 # (A seguir, o restante das suas rotas / mount de staticfiles / etc.)
 # Por exemplo:
 app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
+# Monte o frontend gerado pelo Vite
+app.mount("/", StaticFiles(directory="frontend_dist", html=True), name="frontend")
 # … resto do seu main.py …
