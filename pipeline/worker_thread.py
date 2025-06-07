@@ -5,6 +5,7 @@ import time
 import threading
 import traceback
 import logging
+from queue import Queue
 from pipeline.worker import worker_loop
 
 # Configuração de logging
@@ -18,13 +19,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("worker_thread")
 
-def worker_wrapper(audio_dir: str, lang: str):
+def worker_wrapper(audio_dir: str, lang: str, log_queue: Queue):
     """
     Wrapper para capturar exceções no worker_loop
     """
     try:
         logger.info(f"Iniciando worker_loop para {audio_dir} e idioma {lang}")
-        worker_loop(audio_dir, lang)
+        worker_loop(audio_dir, lang, log_queue)
     except Exception as e:
         logger.error(f"ERRO CRÍTICO no worker_loop: {e}")
         logger.error(f"Traceback completo: {traceback.format_exc()}")
@@ -32,11 +33,11 @@ def worker_wrapper(audio_dir: str, lang: str):
         logger.info("Tentando reiniciar o worker após erro crítico...")
         time.sleep(5)  # Aguardar um pouco antes de reiniciar
         try:
-            worker_loop(audio_dir, lang)
+            worker_loop(audio_dir, lang, log_queue)
         except Exception as e2:
             logger.error(f"Falha ao reiniciar worker após erro: {e2}")
 
-def start_worker_thread(audio_dir: str, lang: str):
+def start_worker_thread(audio_dir: str, lang: str, log_queue: Queue):
     """
     Inicia o worker_loop em uma thread separada para evitar
     bloqueio do event loop do FastAPI.
@@ -56,7 +57,7 @@ def start_worker_thread(audio_dir: str, lang: str):
     # Iniciar o worker em uma thread separada
     worker_thread = threading.Thread(
         target=worker_wrapper,
-        args=(audio_dir, lang),
+        args=(audio_dir, lang, log_queue),
         daemon=True
     )
     worker_thread.start()
