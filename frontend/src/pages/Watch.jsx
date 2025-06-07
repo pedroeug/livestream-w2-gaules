@@ -5,19 +5,28 @@ function Watch() {
   const videoRef = useRef(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [channel, setChannel] = useState('gaules');
+  const [channel, setChannel] = useState('');
   const [lang, setLang] = useState('en');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const channelParam = params.get('channel');
-    const langParam = params.get('lang');
+    const ch = params.get('channel') || 'gaules';
+    const lg = params.get('lang') || 'en';
+    setChannel(ch);
+    setLang(lg);
 
-    if (channelParam) setChannel(channelParam);
-    if (langParam) setLang(langParam);
+    fetch(`/start/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
+    return () => {
+      fetch(`/stop/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
+    };
+  }, []);
 
-    // Usar o servidor HLS dedicado na porta 8001
-    const hlsUrl = `https://8001-ivl2wyxc18k5e6s00cs0p-d0eaed76.manusvm.computer/${channel}/${lang}/index.m3u8`;
+  useEffect(() => {
+    const currentChannel = channel;
+    const currentLang = lang;
+
+    // URL HLS gerado pelo backend na mesma porta
+    const hlsUrl = `/hls/${currentChannel}/${currentLang}/index.m3u8`;
     
     const loadHls = () => {
       if (Hls.isSupported()) {
@@ -29,7 +38,7 @@ function Watch() {
         });
         
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-          console.log('HLS.js vinculado ao elemento de áudio');
+          console.log('HLS.js vinculado ao elemento de vídeo');
         });
         
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -104,9 +113,9 @@ function Watch() {
       )}
       
       <div className="bg-black rounded-lg overflow-hidden">
-        <audio 
-          ref={videoRef} 
-          controls 
+        <video
+          ref={videoRef}
+          controls
           className="w-full"
           autoPlay
         />
@@ -114,7 +123,7 @@ function Watch() {
       
       <div className="mt-4">
         <p className="text-sm text-gray-600">
-          Stream de áudio dublado em tempo real usando Whisper, DeepL e Coqui TTS.
+          Stream de vídeo dublado em tempo real usando Whisper, DeepL e Speechify.
         </p>
       </div>
     </div>
