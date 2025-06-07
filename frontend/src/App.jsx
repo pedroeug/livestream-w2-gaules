@@ -7,8 +7,8 @@ function App() {
   const [channel, setChannel] = useState("gaules");
   const [lang, setLang] = useState("en");
   const [started, setStarted] = useState(false);
-  const [logs, setLogs] = useState([] as string[]); // armazena cada linha de log
-  const esRef = useRef<EventSource | null>(null);
+  const [logs, setLogs] = useState([]); // armazena cada linha de log
+  const esRef = useRef(null);
 
   const startPipeline = async () => {
     try {
