@@ -2,11 +2,14 @@
 
 import asyncio
 import logging
+import os
 import queue
 
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
+from capture.recorder import start_capture
+from pipeline.worker_thread import start_worker_thread
 
 app = FastAPI()
 
@@ -59,8 +62,20 @@ async def stream_logs(request: Request) -> StreamingResponse:
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+# Endpoint para iniciar a captura e o worker de dublagem
+@app.post("/start/{channel}/{lang}")
+async def start_pipeline(channel: str, lang: str):
+    audio_dir = os.path.join("audio_segments", channel)
+    start_capture(channel, audio_dir, log_queue)
+    start_worker_thread(audio_dir, lang, log_queue)
+    logger.info(f"Pipeline iniciado para {channel} em {lang}")
+    return JSONResponse(content={"status": "ok"})
+
+
 # ——————————————————————————————
 # (A seguir, o restante das suas rotas / mount de staticfiles / etc.)
 # Por exemplo:
 app.mount("/hls", StaticFiles(directory="hls", html=False), name="hls")
+# Monte o frontend gerado pelo Vite
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 # … resto do seu main.py …
