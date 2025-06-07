@@ -16,8 +16,8 @@ function Watch() {
     if (channelParam) setChannel(channelParam);
     if (langParam) setLang(langParam);
 
-    // Usar o servidor HLS dedicado na porta 8001
-    const hlsUrl = `https://8001-ivl2wyxc18k5e6s00cs0p-d0eaed76.manusvm.computer/${channel}/${lang}/index.m3u8`;
+    // URL HLS gerado pelo backend na mesma porta
+    const hlsUrl = `/hls/${channel}/${lang}/index.m3u8`;
     
     const loadHls = () => {
       if (Hls.isSupported()) {
