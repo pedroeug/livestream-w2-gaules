@@ -12,8 +12,10 @@ services:
         value: "10000"
       - key: DEEPL_API_KEY
         fromDatabase: deepl_key_secret
-      - key: ELEVENLABS_API_KEY
-        fromDatabase: elevenlabs_key_secret
+      - key: SPEECHIFY_API_KEY
+        fromDatabase: speechify_key_secret
+      - key: SPEECHIFY_VOICE_ID
+        fromDatabase: speechify_voice_id
       - key: OPENAI_API_KEY
         fromDatabase: openai_key_secret
     autoDeploy: true
