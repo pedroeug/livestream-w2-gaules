@@ -10,14 +10,17 @@ function Watch() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const channelParam = params.get('channel');
-    const langParam = params.get('lang');
+    const paramChannel = params.get('channel');
+    const paramLang = params.get('lang');
 
-    if (channelParam) setChannel(channelParam);
-    if (langParam) setLang(langParam);
+    if (paramChannel && paramChannel !== channel) setChannel(paramChannel);
+    if (paramLang && paramLang !== lang) setLang(paramLang);
 
-    // Usar o servidor HLS dedicado na porta 8001
-    const hlsUrl = `https://8001-ivl2wyxc18k5e6s00cs0p-d0eaed76.manusvm.computer/${channel}/${lang}/index.m3u8`;
+    const currentChannel = paramChannel || channel;
+    const currentLang = paramLang || lang;
+
+    // URL HLS gerado pelo backend na mesma porta
+    const hlsUrl = `/hls/${currentChannel}/${currentLang}/index.m3u8`;
     
     const loadHls = () => {
       if (Hls.isSupported()) {
