@@ -33,3 +33,4 @@ def start_capture(channel_name: str, output_dir: str):
             stderr=log_file
         )
     logger.info(f"[recorder] FFmpeg iniciado com PID {process.pid}. Gravando em {output_dir}/segment_*.wav")
+    return process
