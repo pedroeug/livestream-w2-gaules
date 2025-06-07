@@ -3,23 +3,41 @@ import Hls from 'hls.js';
 
 function Watch() {
   const videoRef = useRef(null);
+  const logSourceRef = useRef(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [channel, setChannel] = useState('gaules');
-  const [lang, setLang] = useState('en');
+  const [logs, setLogs] = useState([]);
+  const initialParams = new URLSearchParams(window.location.search);
+  const [channel, setChannel] = useState(
+    initialParams.get('channel') || 'gaules'
+  );
+  const [lang, setLang] = useState(initialParams.get('lang') || 'en');
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const channelParam = params.get('channel');
-    const langParam = params.get('lang');
+    const ch = channel;
+    const lg = lang;
 
-    if (channelParam) setChannel(channelParam);
-    if (langParam) setLang(langParam);
+    fetch(`/start/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
 
-    // Usar o servidor HLS dedicado na porta 8001
-    const hlsUrl = `https://8001-ivl2wyxc18k5e6s00cs0p-d0eaed76.manusvm.computer/${channel}/${lang}/index.m3u8`;
-    
+    const es = new EventSource('/logs/stream');
+    es.onmessage = (e) => setLogs((prev) => [...prev, e.data]);
+    logSourceRef.current = es;
+
+    return () => {
+      fetch(`/stop/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
+      es.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    const currentChannel = channel;
+    const currentLang = lang;
+
+    // URL HLS gerado pelo backend na mesma porta
+    const hlsUrl = `/hls/${currentChannel}/${currentLang}/index.m3u8`;
+
     const loadHls = () => {
+      if (!videoRef.current) return;
       if (Hls.isSupported()) {
         const hls = new Hls({
           debug: true,
@@ -29,7 +47,7 @@ function Watch() {
         });
         
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-          console.log('HLS.js vinculado ao elemento de áudio');
+          console.log('HLS.js vinculado ao elemento de vídeo');
         });
         
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -104,17 +122,23 @@ function Watch() {
       )}
       
       <div className="bg-black rounded-lg overflow-hidden">
-        <audio 
-          ref={videoRef} 
-          controls 
+        <video
+          ref={videoRef}
+          controls
           className="w-full"
           autoPlay
         />
       </div>
+
+      <div className="bg-gray-900 text-white mt-4 p-2 rounded overflow-y-auto" style={{maxHeight: '200px'}}>
+        {logs.map((line, idx) => (
+          <div key={idx}>{line}</div>
+        ))}
+      </div>
       
       <div className="mt-4">
         <p className="text-sm text-gray-600">
-          Stream de áudio dublado em tempo real usando Whisper, DeepL e Coqui TTS.
+          Stream de vídeo dublado em tempo real usando Whisper, DeepL e Speechify.
         </p>
       </div>
     </div>
