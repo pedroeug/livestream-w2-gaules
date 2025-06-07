@@ -6,7 +6,7 @@ WORKDIR /app/frontend
 
 # Copia apenas o package.json (sem package-lock.json) e instala dependências
 COPY frontend/package.json ./
-RUN npm install --legacy-peer-deps --no‐package‐lock
+RUN npm install --legacy-peer-deps --no-package-lock
 
 # Copia todo o código do frontend e executa o build de produção
 COPY frontend/ ./
@@ -39,6 +39,7 @@ RUN mkdir -p audio_segments hls
 # Copia o código-fonte do backend e pipeline
 COPY backend/ ./backend
 COPY pipeline/ ./pipeline
+COPY capture/ ./capture
 
 # Se você tiver um arquivo .env, descomente a linha abaixo:
 # COPY .env ./
