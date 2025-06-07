@@ -90,9 +90,10 @@ def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
                         f.write(b64decode(audio_data_base64))
                     log_queue.put(f"[worker] Áudio Speechify salvo em {temp_wav}")
                 else:
-                    log_queue.put("[worker] Pulando síntese: credenciais Speechify não configuradas.")
-                    processed.add(filename)
-                    continue
+                    log_queue.put(
+                        "[worker] Pulando síntese: credenciais Speechify não configuradas. Usando áudio original."
+                    )
+                    temp_wav = wav_path
 
                 # --- Converte wav para mp3 (para concatenar) ---
                 log_queue.put(f"[worker] Convertendo WAV para MP3: {temp_wav}")
