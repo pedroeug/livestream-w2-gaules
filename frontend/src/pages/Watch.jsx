@@ -10,14 +10,23 @@ function Watch() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const channelParam = params.get('channel');
-    const langParam = params.get('lang');
+    const ch = params.get('channel') || channel;
+    const lg = params.get('lang') || lang;
+    setChannel(ch);
+    setLang(lg);
 
-    if (channelParam) setChannel(channelParam);
-    if (langParam) setLang(langParam);
+    fetch(`/start/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
+    return () => {
+      fetch(`/stop/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
+    };
+  }, []);
 
-    // Usar o servidor HLS dedicado na porta 8001
-    const hlsUrl = `https://8001-ivl2wyxc18k5e6s00cs0p-d0eaed76.manusvm.computer/${channel}/${lang}/index.m3u8`;
+  useEffect(() => {
+    const currentChannel = channel;
+    const currentLang = lang;
+
+    // URL HLS gerado pelo backend na mesma porta
+    const hlsUrl = `/hls/${currentChannel}/${currentLang}/index.m3u8`;
     
     const loadHls = () => {
       if (Hls.isSupported()) {

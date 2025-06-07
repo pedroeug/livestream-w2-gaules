@@ -3,12 +3,15 @@
 import os
 import time
 import whisper
-from deep_translator import DeeplTranslator
+from deep_translator import DeeplTranslator, GoogleTranslator
 import requests
+from speechify import Speechify
+from speechify.core.api_error import ApiError
 import subprocess
 from queue import Queue
+import threading
 
-def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
+def worker_loop(audio_dir: str, lang: str, log_queue: Queue, stop_event: threading.Event):
     """
     Loop contínuo que:
       1. Monitora novos .wav em audio_dir
@@ -23,16 +26,28 @@ def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
     log_queue.put("[worker] Modelo Whisper carregado (base).")
 
     # 2) Configura credenciais Speechify (via env var SPEECHIFY_API_KEY)
-    speechify_key = os.getenv("SPEECHIFY_API_KEY")
-    speechify_voice_id = os.getenv("SPEECHIFY_VOICE_ID")  # ex: "3af44bf3-..."
+    speechify_key = os.getenv("SPEECHIFY_API_KEY", "").strip()
+    speechify_voice_id = os.getenv("SPEECHIFY_VOICE_ID", "").strip()
+    speechify_client = None
     if not speechify_key or not speechify_voice_id:
         log_queue.put("[worker] AVISO: SPEECHIFY_API_KEY ou SPEECHIFY_VOICE_ID não definido. TTS será pulado.")
     else:
-        log_queue.put("[worker] Speechify configurado corretamente.")
+        try:
+            speechify_client = Speechify(token=speechify_key)
+            log_queue.put("[worker] Speechify configurado corretamente.")
+        except Exception as e:
+            log_queue.put(f"[worker] Erro ao inicializar Speechify: {e}. TTS será pulado.")
+            speechify_client = None
+
+    deepl_key = os.getenv("DEEPL_API_KEY", "").strip()
+    if deepl_key:
+        log_queue.put("[worker] DeepL configurado corretamente.")
+    else:
+        log_queue.put("[worker] AVISO: DEEPL_API_KEY não definido. Usando Google Translate.")
 
     processed = set()
 
-    while True:
+    while not stop_event.is_set():
         # 3) Para cada arquivo .wav não processado:
         for filename in sorted(os.listdir(audio_dir)):
             if not filename.endswith(".wav") or filename in processed:
@@ -48,51 +63,50 @@ def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
                 text = result["text"].strip()
                 log_queue.put(f"[worker] Transcrição: {text}")
 
-                # --- Tradução DeepL ---
+                # --- Tradução ---
                 log_queue.put(f"[worker] Traduzindo para {lang} ...")
-                translator = DeeplTranslator(source="auto", target=lang)
-                translated = translator.translate(text)
+                try:
+                    if deepl_key:
+                        translator = DeeplTranslator(api_key=deepl_key, source="auto", target=lang, timeout=5)
+                    else:
+                        translator = GoogleTranslator(source="auto", target=lang, timeout=5)
+                    translated = translator.translate(text)
+                except Exception as e:
+                    log_queue.put(f"[worker] Erro na tradução: {e}. Usando texto original.")
+                    translated = text
                 log_queue.put(f"[worker] Tradução: {translated}")
 
-                # --- Síntese Speechify (via HTTP) ---
-                if speechify_key and speechify_voice_id:
+                # --- Síntese com Speechify ---
+                if speechify_client:
                     log_queue.put("[worker] Sintetizando com Speechify ...")
-                    # Monta payload para Speechify:
-                    headers = {
-                        "Authorization": f"Bearer {speechify_key}",
-                        "Content-Type": "application/json"
-                    }
-                    payload = {
-                        "voiceId": speechify_voice_id,
-                        "input": translated
-                    }
-                    # Faz request:
-                    response = requests.post(
-                        "https://api.sws.speechify.com/v1/tts/audio",
-                        json=payload,
-                        headers=headers
-                    )
-                    if response.status_code != 200:
-                        log_queue.put(f"[worker] Erro Speechify ({response.status_code}): {response.text}")
-                        processed.add(filename)
-                        continue
+                    try:
+                        response = speechify_client.tts.audio.speech(
+                            input=translated,
+                            voice_id=speechify_voice_id,
+                            audio_format="wav"
+                        )
+                        audio_data_base64 = response.audio_data
+                    except ApiError as e:
+                        log_queue.put(f"[worker] Erro Speechify ({e.status_code}): {e.body}")
+                        audio_data_base64 = None
+                    except Exception as e:
+                        log_queue.put(f"[worker] Erro inesperado Speechify: {e}")
+                        audio_data_base64 = None
 
-                    audio_data_base64 = response.json().get("audioData")
-                    if not audio_data_base64:
-                        log_queue.put(f"[worker] Erro: resposta Speechify sem campo audioData.")
-                        processed.add(filename)
-                        continue
-
-                    # Converte base64 → binário e salva em wav temporário:
-                    from base64 import b64decode
-                    temp_wav = wav_path.replace(".wav", f"_{lang}.wav")
-                    with open(temp_wav, "wb") as f:
-                        f.write(b64decode(audio_data_base64))
-                    log_queue.put(f"[worker] Áudio Speechify salvo em {temp_wav}")
+                    if audio_data_base64:
+                        from base64 import b64decode
+                        temp_wav = wav_path.replace(".wav", f"_{lang}.wav")
+                        with open(temp_wav, "wb") as f:
+                            f.write(b64decode(audio_data_base64))
+                        log_queue.put(f"[worker] Áudio Speechify salvo em {temp_wav}")
+                    else:
+                        log_queue.put("[worker] Falha na síntese. Usando áudio original.")
+                        temp_wav = wav_path
                 else:
-                    log_queue.put("[worker] Pulando síntese: credenciais Speechify não configuradas.")
-                    processed.add(filename)
-                    continue
+                    log_queue.put(
+                        "[worker] Pulando síntese: credenciais Speechify não configuradas. Usando áudio original."
+                    )
+                    temp_wav = wav_path
 
                 # --- Converte wav para mp3 (para concatenar) ---
                 log_queue.put(f"[worker] Convertendo WAV para MP3: {temp_wav}")
@@ -149,9 +163,17 @@ def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
                 log_queue.put(f"[worker] HLS gerado em {output_index}")
 
                 processed.add(filename)
+                try:
+                    dest_wav = os.path.join(processed_dir, filename)
+                    os.replace(wav_path, dest_wav)
+                    os.remove(mp3_path)
+                except Exception:
+                    pass
 
             except Exception as e:
                 log_queue.put(f"[worker] ERRO ao processar {wav_path}: {e}")
                 processed.add(filename)
 
         time.sleep(1)
+
+    log_queue.put("[worker] Loop finalizado")
