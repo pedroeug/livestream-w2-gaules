@@ -40,8 +40,8 @@ Crie um arquivo `.env` na raiz do projeto com as seguintes variáveis:
 
 ```
 PORT=8000
-ELEVENLABS_API_KEY=sua_chave_elevenlabs
-ELEVENLABS_VOICE_ID=id_da_voz_elevenlabs
+SPEECHIFY_API_KEY=sua_chave_speechify
+SPEECHIFY_VOICE_ID=id_da_voz_speechify
 DEEPL_API_KEY=sua_chave_deepl
 ```
 
@@ -81,8 +81,8 @@ After=network.target
 User=seu_usuario
 WorkingDirectory=/caminho/para/livestream-w2-gaules
 Environment="PORT=8000"
-Environment="ELEVENLABS_API_KEY=sua_chave_elevenlabs"
-Environment="ELEVENLABS_VOICE_ID=id_da_voz_elevenlabs"
+Environment="SPEECHIFY_API_KEY=sua_chave_speechify"
+Environment="SPEECHIFY_VOICE_ID=id_da_voz_speechify"
 Environment="DEEPL_API_KEY=sua_chave_deepl"
 ExecStart=/usr/bin/python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 Restart=always
@@ -106,8 +106,8 @@ Se preferir usar Docker, um Dockerfile está disponível na pasta `deploy_packag
 ```bash
 docker build -t livestream-w2 .
 docker run -p 8000:8000 \
-  -e ELEVENLABS_API_KEY=sua_chave_elevenlabs \
-  -e ELEVENLABS_VOICE_ID=id_da_voz_elevenlabs \
+  -e SPEECHIFY_API_KEY=sua_chave_speechify \
+  -e SPEECHIFY_VOICE_ID=id_da_voz_speechify \
   -e DEEPL_API_KEY=sua_chave_deepl \
   livestream-w2
 ```
