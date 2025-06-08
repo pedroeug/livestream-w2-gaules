@@ -6,8 +6,8 @@ services:
       - "8000:8000"
     environment:
       - PORT=8000
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
-      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - SPEECHIFY_API_KEY=${SPEECHIFY_API_KEY}
+      - SPEECHIFY_VOICE_ID=${SPEECHIFY_VOICE_ID}
       - DEEPL_API_KEY=${DEEPL_API_KEY}
     volumes:
       - ./hls:/app/hls

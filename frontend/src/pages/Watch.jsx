@@ -2,24 +2,53 @@ import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 
 function Watch() {
-  const videoRef = useRef(null);
+  const audioRef = useRef(null);
+  const logSourceRef = useRef(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [channel, setChannel] = useState('gaules');
-  const [lang, setLang] = useState('en');
+  const [logs, setLogs] = useState([]);
+  const initialParams = new URLSearchParams(window.location.search);
+  const [channel, setChannel] = useState(
+    initialParams.get('channel') || 'gaules'
+  );
+  const [lang, setLang] = useState(initialParams.get('lang') || 'en');
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const channelParam = params.get('channel');
-    const langParam = params.get('lang');
+    const ch = channel;
+    const lg = lang;
 
-    if (channelParam) setChannel(channelParam);
-    if (langParam) setLang(langParam);
+    fetch(`/start/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
 
-    // Usar o servidor HLS dedicado na porta 8001
-    const hlsUrl = `https://8001-ivl2wyxc18k5e6s00cs0p-d0eaed76.manusvm.computer/${channel}/${lang}/index.m3u8`;
-    
+    const es = new EventSource('/logs/stream');
+    es.onmessage = (e) => setLogs((prev) => [...prev, e.data]);
+    logSourceRef.current = es;
+
+    return () => {
+      fetch(`/stop/${ch}/${lg}`, { method: 'POST' }).catch(() => {});
+      es.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    const currentChannel = channel;
+    const currentLang = lang;
+
+    // URL HLS gerado pelo backend na mesma porta
+    const hlsUrl = `/hls/${currentChannel}/${currentLang}/index.m3u8`;
+
+    async function waitForPlaylist(url, retries = 10) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url, { method: 'HEAD' });
+          if (res.ok) return true;
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      return false;
+    }
+
     const loadHls = () => {
+      if (!audioRef.current) return;
       if (Hls.isSupported()) {
         const hls = new Hls({
           debug: true,
@@ -34,7 +63,7 @@ function Watch() {
         
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log('HLS manifest carregado, iniciando playback');
-          videoRef.current.play().catch(e => {
+          audioRef.current.play().catch(e => {
             console.log('Erro ao iniciar playback automático:', e);
           });
           setLoading(false);
@@ -61,17 +90,19 @@ function Watch() {
           }
         });
         
-        hls.loadSource(hlsUrl);
-        hls.attachMedia(videoRef.current);
+        waitForPlaylist(hlsUrl).then(() => {
+          hls.loadSource(hlsUrl);
+          hls.attachMedia(audioRef.current);
+        });
         
         return () => {
           hls.destroy();
         };
-      } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+      } else if (audioRef.current.canPlayType('application/vnd.apple.mpegurl')) {
         // Para Safari que tem suporte nativo a HLS
-        videoRef.current.src = hlsUrl;
-        videoRef.current.addEventListener('loadedmetadata', () => {
-          videoRef.current.play().catch(e => {
+        audioRef.current.src = hlsUrl;
+        audioRef.current.addEventListener('loadedmetadata', () => {
+          audioRef.current.play().catch(e => {
             console.log('Erro ao iniciar playback automático:', e);
           });
           setLoading(false);
@@ -81,7 +112,7 @@ function Watch() {
       }
     };
 
-    if (videoRef.current) {
+    if (audioRef.current) {
       loadHls();
     }
   }, [channel, lang]);
@@ -104,17 +135,23 @@ function Watch() {
       )}
       
       <div className="bg-black rounded-lg overflow-hidden">
-        <audio 
-          ref={videoRef} 
-          controls 
+        <audio
+          ref={audioRef}
+          controls
           className="w-full"
           autoPlay
         />
       </div>
+
+      <div className="bg-gray-900 text-white mt-4 p-2 rounded overflow-y-auto" style={{maxHeight: '200px'}}>
+        {logs.map((line, idx) => (
+          <div key={idx}>{line}</div>
+        ))}
+      </div>
       
       <div className="mt-4">
         <p className="text-sm text-gray-600">
-          Stream de áudio dublado em tempo real usando Whisper, DeepL e Coqui TTS.
+          Áudio da live dublado em tempo real usando Whisper, DeepL e Speechify.
         </p>
       </div>
     </div>
