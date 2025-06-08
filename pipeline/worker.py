@@ -3,12 +3,14 @@
 import os
 import time
 import whisper
-from deep_translator import DeeplTranslator
-import requests
+from deep_translator import DeeplTranslator, GoogleTranslator
+from speechify import Speechify
+from speechify.core.api_error import ApiError
 import subprocess
 from queue import Queue
+import threading
 
-def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
+def worker_loop(audio_dir: str, lang: str, log_queue: Queue, stop_event: threading.Event):
     """
     Loop contínuo que:
       1. Monitora novos .wav em audio_dir
@@ -23,19 +25,45 @@ def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
     log_queue.put("[worker] Modelo Whisper carregado (base).")
 
     # 2) Configura credenciais Speechify (via env var SPEECHIFY_API_KEY)
-    speechify_key = os.getenv("SPEECHIFY_API_KEY")
-    speechify_voice_id = os.getenv("SPEECHIFY_VOICE_ID")  # ex: "3af44bf3-..."
+    speechify_key = os.getenv("SPEECHIFY_API_KEY", "").strip()
+    speechify_voice_id = os.getenv("SPEECHIFY_VOICE_ID", "").strip()
+    speechify_client = None
     if not speechify_key or not speechify_voice_id:
         log_queue.put("[worker] AVISO: SPEECHIFY_API_KEY ou SPEECHIFY_VOICE_ID não definido. TTS será pulado.")
     else:
-        log_queue.put("[worker] Speechify configurado corretamente.")
+        try:
+            speechify_client = Speechify(token=speechify_key)
+            log_queue.put("[worker] Speechify configurado corretamente.")
+        except Exception as e:
+            log_queue.put(f"[worker] Erro ao inicializar Speechify: {e}. TTS será pulado.")
+            speechify_client = None
+
+    deepl_key = os.getenv("DEEPL_API_KEY", "").strip()
+    if deepl_key:
+        log_queue.put("[worker] DeepL configurado corretamente.")
+    else:
+        log_queue.put("[worker] AVISO: DEEPL_API_KEY não definido. Usando Google Translate.")
 
     processed = set()
+    channel = os.path.basename(os.path.abspath(audio_dir))
+    hls_dir = os.path.join("hls", channel, lang)
+    os.makedirs(hls_dir, exist_ok=True)
+    playlist = os.path.join(hls_dir, "index.m3u8")
+    if not os.path.exists(playlist):
+        with open(playlist, "w") as f:
+            f.write("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:30\n#EXT-X-MEDIA-SEQUENCE:0\n")
+    seq = 0
+    skip_first = True  # ignora o primeiro segmento capturado
 
-    while True:
+    while not stop_event.is_set():
         # 3) Para cada arquivo .wav não processado:
         for filename in sorted(os.listdir(audio_dir)):
             if not filename.endswith(".wav") or filename in processed:
+                continue
+
+            if skip_first:
+                processed.add(filename)
+                skip_first = False
                 continue
 
             wav_path = os.path.join(audio_dir, filename)
@@ -48,110 +76,87 @@ def worker_loop(audio_dir: str, lang: str, log_queue: Queue):
                 text = result["text"].strip()
                 log_queue.put(f"[worker] Transcrição: {text}")
 
-                # --- Tradução DeepL ---
+                # --- Tradução ---
                 log_queue.put(f"[worker] Traduzindo para {lang} ...")
-                translator = DeeplTranslator(source="auto", target=lang)
-                translated = translator.translate(text)
+                translated = text
+                try:
+                    if deepl_key:
+                        # DeepL não aceita "auto" como source_lang via API.
+                        # Como a transcrição sempre retorna português,
+                        # informamos explicitamente "pt".
+                        translator = DeeplTranslator(api_key=deepl_key, source="pt", target=lang, timeout=5)
+                        translated = translator.translate(text)
+                    else:
+                        translator = GoogleTranslator(source="auto", target=lang, timeout=5)
+                        translated = translator.translate(text)
+                except Exception as e:
+                    log_queue.put(f"[worker] Erro na tradução com DeepL: {e}.")
+                    if deepl_key:
+                        log_queue.put("[worker] Tentando Google Translate ...")
+                        try:
+                            translator = GoogleTranslator(source="auto", target=lang, timeout=5)
+                            translated = translator.translate(text)
+                        except Exception as e2:
+                            log_queue.put(f"[worker] Falha no Google Translate: {e2}. Usando texto original.")
+                            translated = text
                 log_queue.put(f"[worker] Tradução: {translated}")
 
-                # --- Síntese Speechify (via HTTP) ---
-                if speechify_key and speechify_voice_id:
+                # --- Síntese com Speechify ---
+                if speechify_client:
                     log_queue.put("[worker] Sintetizando com Speechify ...")
-                    # Monta payload para Speechify:
-                    headers = {
-                        "Authorization": f"Bearer {speechify_key}",
-                        "Content-Type": "application/json"
-                    }
-                    payload = {
-                        "voiceId": speechify_voice_id,
-                        "input": translated
-                    }
-                    # Faz request:
-                    response = requests.post(
-                        "https://api.sws.speechify.com/v1/tts/audio",
-                        json=payload,
-                        headers=headers
-                    )
-                    if response.status_code != 200:
-                        log_queue.put(f"[worker] Erro Speechify ({response.status_code}): {response.text}")
-                        processed.add(filename)
-                        continue
+                    try:
+                        response = speechify_client.tts.audio.speech(
+                            input=translated,
+                            voice_id=speechify_voice_id,
+                            audio_format="wav"
+                        )
+                        audio_data_base64 = response.audio_data
+                    except ApiError as e:
+                        detail = str(e.body)[:200] if hasattr(e, 'body') else str(e)
+                        log_queue.put(f"[worker] Erro Speechify ({e.status_code}): {detail}")
+                        audio_data_base64 = None
+                    except Exception as e:
+                        log_queue.put(f"[worker] Erro inesperado Speechify: {e}")
+                        audio_data_base64 = None
 
-                    audio_data_base64 = response.json().get("audioData")
-                    if not audio_data_base64:
-                        log_queue.put(f"[worker] Erro: resposta Speechify sem campo audioData.")
-                        processed.add(filename)
-                        continue
-
-                    # Converte base64 → binário e salva em wav temporário:
-                    from base64 import b64decode
-                    temp_wav = wav_path.replace(".wav", f"_{lang}.wav")
-                    with open(temp_wav, "wb") as f:
-                        f.write(b64decode(audio_data_base64))
-                    log_queue.put(f"[worker] Áudio Speechify salvo em {temp_wav}")
+                    if audio_data_base64:
+                        from base64 import b64decode
+                        temp_wav = wav_path.replace(".wav", f"_{lang}.wav")
+                        with open(temp_wav, "wb") as f:
+                            f.write(b64decode(audio_data_base64))
+                        log_queue.put(f"[worker] Áudio Speechify salvo em {temp_wav}")
+                    else:
+                        log_queue.put("[worker] Falha na síntese. Usando áudio original.")
+                        temp_wav = wav_path
                 else:
-                    log_queue.put("[worker] Pulando síntese: credenciais Speechify não configuradas.")
-                    processed.add(filename)
-                    continue
-
-                # --- Converte wav para mp3 (para concatenar) ---
-                log_queue.put(f"[worker] Convertendo WAV para MP3: {temp_wav}")
-                mp3_path = temp_wav.replace(".wav", ".mp3")
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", temp_wav, "-codec:a", "libmp3lame", mp3_path],
-                    check=True
-                )
-                log_queue.put(f"[worker] MP3 gerado: {mp3_path}")
-
-                # --- Concatena no “concat.mp3” contínuo ---
-                channel = os.path.basename(audio_dir)
-                processed_dir = os.path.join(audio_dir, "processed")
-                os.makedirs(processed_dir, exist_ok=True)
-                concat_mp3 = os.path.join(processed_dir, "concat.mp3")
-                if not os.path.exists(concat_mp3):
-                    # Se não existe, cria um mp3 vazio com um segundo de silêncio
-                    silent = os.path.join(processed_dir, "silent.wav")
-                    subprocess.run(
-                        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", 
-                         "-t", "0.1", "-q:a", "9", silent],
-                        check=True
+                    log_queue.put(
+                        "[worker] Pulando síntese: credenciais Speechify não configuradas. Usando áudio original."
                     )
-                    subprocess.run(
-                        ["ffmpeg", "-y", "-i", silent, "-codec:a", "libmp3lame", concat_mp3],
-                        check=True
-                    )
-                    log_queue.put(f"[worker] Arquivo inicial concat.mp3 criado em {concat_mp3}")
+                    temp_wav = wav_path
 
-                # Agora concatena: concat|novo → temp → substitui
-                log_queue.put(f"[worker] Adicionando {mp3_path} ao concat.mp3")
-                temp_out = concat_mp3 + ".temp"
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", f"concat:{concat_mp3}|{mp3_path}", "-acodec", "copy", temp_out],
-                    check=True
-                )
-                os.replace(temp_out, concat_mp3)
-                log_queue.put(f"[worker] concat.mp3 atualizado com {mp3_path}")
-
-                # --- Gera HLS ---
-                hls_dir = os.path.join("hls", channel, lang)
-                os.makedirs(hls_dir, exist_ok=True)
-                ts_pattern = os.path.join(hls_dir, "%03d.ts")
-                output_index = os.path.join(hls_dir, "index.m3u8")
-                log_queue.put(f"[worker] Gerando HLS em {output_index} ...")
+                # --- Converte áudio para segmento TS ---
+                out_ts = os.path.join(hls_dir, filename.replace(".wav", ".ts"))
                 subprocess.run([
-                    "ffmpeg", "-y", "-i", concat_mp3,
-                    "-c:a", "aac", "-b:a", "128k", "-vn",
-                    "-hls_time", "10",
-                    "-hls_playlist_type", "event",
-                    "-hls_segment_filename", ts_pattern,
-                    output_index
+                    "ffmpeg", "-y", "-i", temp_wav, "-c:a", "aac", "-b:a", "128k",
+                    "-f", "mpegts", out_ts
                 ], check=True)
-                log_queue.put(f"[worker] HLS gerado em {output_index}")
+                with open(playlist, "a") as pl:
+                    pl.write(f"#EXTINF:30.0,\n{os.path.basename(out_ts)}\n")
+                seq += 1
+                log_queue.put(f"[worker] Segmento gerado: {out_ts}")
 
                 processed.add(filename)
+                dest_wav = os.path.join(audio_dir, "processed", filename)
+                os.makedirs(os.path.dirname(dest_wav), exist_ok=True)
+                try:
+                    os.replace(wav_path, dest_wav)
+                except Exception:
+                    pass
 
             except Exception as e:
                 log_queue.put(f"[worker] ERRO ao processar {wav_path}: {e}")
                 processed.add(filename)
 
         time.sleep(1)
+
+    log_queue.put("[worker] Loop finalizado")
