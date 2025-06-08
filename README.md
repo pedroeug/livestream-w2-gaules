@@ -40,10 +40,12 @@ Crie um arquivo `.env` na raiz do projeto com as seguintes variáveis:
 
 ```
 PORT=8000
-ELEVENLABS_API_KEY=sua_chave_elevenlabs
-ELEVENLABS_VOICE_ID=id_da_voz_elevenlabs
-DEEPL_API_KEY=sua_chave_deepl
+SPEECHIFY_API_KEY=sua_chave_speechify
+SPEECHIFY_VOICE_ID=id_da_voz_speechify
+DEEPL_API_KEY=sua_chave_deepl  # opcional, usa Google Translate se ausente
 ```
+
+O backend lê automaticamente esse arquivo ao iniciar, desde que `python-dotenv` esteja instalado (já incluído em `requirements.txt`).
 
 ## Estrutura de Diretórios
 
@@ -52,6 +54,9 @@ Certifique-se de que os seguintes diretórios existam:
 mkdir -p hls/gaules/en
 mkdir -p audio_segments/gaules
 ```
+Ao iniciar uma nova sessão pelo endpoint `/start/{canal}/{idioma}` os
+conteúdos desses diretórios são limpos automaticamente, garantindo que o
+processamento comece do zero. Cada segmento de áudio tem 30 segundos. Quando a dublagem em outro idioma é gerada, ela é mesclada ao som original; se não houver dublagem o áudio original é mantido. Assim o player recebe um fluxo contínuo de som enquanto a captura prossegue.
 
 ## Execução
 
@@ -81,8 +86,8 @@ After=network.target
 User=seu_usuario
 WorkingDirectory=/caminho/para/livestream-w2-gaules
 Environment="PORT=8000"
-Environment="ELEVENLABS_API_KEY=sua_chave_elevenlabs"
-Environment="ELEVENLABS_VOICE_ID=id_da_voz_elevenlabs"
+Environment="SPEECHIFY_API_KEY=sua_chave_speechify"
+Environment="SPEECHIFY_VOICE_ID=id_da_voz_speechify"
 Environment="DEEPL_API_KEY=sua_chave_deepl"
 ExecStart=/usr/bin/python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 Restart=always
@@ -106,8 +111,8 @@ Se preferir usar Docker, um Dockerfile está disponível na pasta `deploy_packag
 ```bash
 docker build -t livestream-w2 .
 docker run -p 8000:8000 \
-  -e ELEVENLABS_API_KEY=sua_chave_elevenlabs \
-  -e ELEVENLABS_VOICE_ID=id_da_voz_elevenlabs \
+  -e SPEECHIFY_API_KEY=sua_chave_speechify \
+  -e SPEECHIFY_VOICE_ID=id_da_voz_speechify \
   -e DEEPL_API_KEY=sua_chave_deepl \
   livestream-w2
 ```
